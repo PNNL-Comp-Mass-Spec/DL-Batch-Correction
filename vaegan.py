@@ -118,8 +118,8 @@ class VAEGAN():
             return metrics
         
         history = []
-        t = trange(num_epochs,  position=0, leave=True)
         self.model = self.model.to(device)
+        t = trange(num_epochs,  position=0, leave=True)
         for epoch in t:
             epoch_history = []
             for x, y in trainloader:
