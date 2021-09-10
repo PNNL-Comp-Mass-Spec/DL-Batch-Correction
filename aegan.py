@@ -24,6 +24,7 @@ class AEGANModule(nn.Module):
         self.encoder       = self.multi_layer_perceptron(encoder_dims)
         self.decoder       = self.multi_layer_perceptron(decoder_dims)
         self.discriminator = self.multi_layer_perceptron(discriminator_dims)
+        self.discriminator = nn.Sequential(self.discriminator, nn.Softmax(dim = 1))
         
         self.training = True
     
@@ -41,8 +42,7 @@ class AEGANModule(nn.Module):
         
     def to_one_hot(self, y):
         y = y.view(-1,1)
-        y_onehot = torch.FloatTensor(y.shape[0], self.n_batches)
-        y_onehot = y_onehot.to(y.device)
+        y_onehot = torch.FloatTensor(y.shape[0], self.n_batches, device=y.device)
         y_onehot.zero_()
         y_onehot.scatter_(1, y, 1)
         return(y_onehot)
@@ -57,8 +57,7 @@ class AEGANModule(nn.Module):
 
     def correct(self, x):
         z = self.encoder(x)
-        y = torch.zeros((x.shape[0], self.n_batches))
-        y = y.to(x.device)
+        y = torch.zeros((x.shape[0], self.n_batches), device=x.device)
         z_plus_y = torch.column_stack((z, y))
         x_star = self.decoder(z_plus_y)
         return x_star
@@ -74,14 +73,7 @@ class AEGAN():
         self.model = AEGANModule(n_features, n_batches, n_latent, n_hidden)
         
         
-    def loss_fn(x, y, x_pred, y_pred):
-        rec_loss  = nn.MSELoss()(x_pred, x)
-        disc_loss = nn.CrossEntropyLoss()(y_pred, y)
-        loss = rec_loss - regularization * disc_loss
-        metrics = {'rec_loss'  : rec_loss,
-                   'disc_loss' : disc_loss,
-                   'loss'      : loss}
-        return metrics
+    
     
     def train(self, train_data, device,
                 num_epochs = 1000,
@@ -103,6 +95,15 @@ class AEGAN():
         self.optimizers = [optimizer_ae, optimizer_disc]
 
         
+        def loss_fn(x, y, x_pred, y_pred):
+            rec_loss  = nn.MSELoss()(x_pred, x)
+            disc_loss = nn.CrossEntropyLoss()(y_pred, y)
+            loss = rec_loss - regularization * disc_loss
+            metrics = {'rec_loss'  : rec_loss,
+                       'disc_loss' : disc_loss,
+                       'loss'      : loss}
+            return metrics
+    
         history = []
         self.model = self.model.to(device)
         t = trange(num_epochs,  position=0, leave=True)
@@ -116,7 +117,7 @@ class AEGAN():
 
                 x_pred, y_pred = self.model.forward(x, y)
                 
-                metrics = self.loss_fn(x, y, x_pred, y_pred)
+                metrics = loss_fn(x, y, x_pred, y_pred)
                 
                 if epoch % 2 == 0:
                     loss = metrics['loss']
@@ -153,5 +154,77 @@ class AEGAN():
         plt.show() if file is None else plt.savefig(file)
     
     
+    def get_model_outputs(self, device, data):
+        self.model = self.model.to(device)
+        x = data[:][0].to(device)
+        y = data[:][1].to(device)
+        
+        z = self.model.encoder(x)
+        x_pred, _ = self.model.forward(x, y)
+        x_star    = self.model.correct(x)
+        
+        # Original data
+        model_outputs = {'original'      : x,
+                         'encoded'       : z,
+                         'reconstructed' : x_pred,
+                         'corrected'     : x_star}
+        model_outputs = {_ : x.detach().numpy() for (_, x) in model_outputs.items()}
+        return model_outputs
+
+        
+    def compute_pca(self, data, labels):
+        import numpy as np
+        from sklearn.preprocessing import StandardScaler
+        from scipy.linalg import eigh
+        import pandas as pd 
+
+        X = StandardScaler().fit_transform(data)
+        A = np.matmul(X.T , X)
+
+        k = X.shape[1]
+        values, vectors = eigh(A, eigvals=(k-2, k-1))
+        vectors = vectors.T
+        T = np.matmul(vectors, X.T)
+
+        T = np.vstack((T, labels)).T
+        df = pd.DataFrame(data=T, columns=('PC1', 'PC2', 'label'))
+        df['label'] = df['label'].astype('category')
+        return df
+    
+    def plot_all_pca(self, data, device, title=None):
+        import seaborn as sns
+        import matplotlib.pyplot as plt
+        fig, axs = plt.subplots(2, 2, figsize=(8, 8))
+        fig.suptitle(title)
+
+        y = data[:][1]
+        
+        model_outputs = self.get_model_outputs(device, data)
+        
+        
+        # Original data
+        x = model_outputs['original']
+        df = self.compute_pca(x, y)
+        sns.scatterplot(x='PC1', y='PC2', data=df, hue='label', legend=False, ax=axs[0,0])
+        axs[0,0].set_title('Original')
+
+        # Encoded data
+        x = model_outputs['encoded']
+        df = self.compute_pca(x, y)
+        sns.scatterplot(x='PC1', y='PC2', data=df, hue='label', legend=False, ax=axs[0,1])
+        axs[0,1].set_title('Encoded')
+
+        # Reconstructed data
+        x = model_outputs['reconstructed']
+        df = self.compute_pca(x, y)
+        sns.scatterplot(x='PC1', y='PC2', data=df, hue='label', legend=False, ax=axs[1,0])
+        axs[1,0].set_title('Reconstructed')
+
+        # Corrected data
+        x = model_outputs['corrected']
+        df = self.compute_pca(x, y)
+        sns.scatterplot(x='PC1', y='PC2', data=df, hue='label', legend=False, ax=axs[1,1])
+        axs[1,1].set_title('Corrected')
+
     
 
