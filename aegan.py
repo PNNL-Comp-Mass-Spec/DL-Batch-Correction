@@ -42,7 +42,7 @@ class AEGANModule(nn.Module):
         
     def to_one_hot(self, y):
         y = y.view(-1,1)
-        y_onehot = torch.FloatTensor(y.shape[0], self.n_batches, device=y.device)
+        y_onehot = torch.empty(y.shape[0], self.n_batches, device=y.device)
         y_onehot.zero_()
         y_onehot.scatter_(1, y, 1)
         return(y_onehot)
