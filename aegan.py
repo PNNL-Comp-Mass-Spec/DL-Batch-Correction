@@ -141,7 +141,7 @@ class AEGAN():
         
         import matplotlib.pyplot as plt
         fig, (ax1) = plt.subplots(1, 1)
-        tmax = self.history.shape[1] if tmax is None else tmax
+        tmax = self.history.shape[0] if tmax is None else tmax
         ax1.set_xlabel('Epoch')
         ax1.plot(history.T[0][tmin:tmax],
                  label='Reconstruction error')
