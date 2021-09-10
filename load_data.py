@@ -77,7 +77,10 @@ def load_labeled_data(path_to_data, path_to_labels):
     # gather metadata
     n_features   = len(dataset[0][:][0])
     n_batches    = len(torch.unique(dataset[:][1]))
-    metadata = (featureNames, sampleNames, n_features, n_batches)
+    metadata = {'featureNames':featureNames,
+                'sampleNames':sampleNames,
+                'n_features':n_features,
+                'n_batches':n_batches}
     
     # partition into train and test sets
     train_size = int(0.5 * len(dataset))
