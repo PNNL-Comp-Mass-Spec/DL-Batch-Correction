@@ -58,6 +58,7 @@ class AEGANModule(nn.Module):
     def correct(self, x):
         z = self.encoder(x)
         y = torch.zeros((x.shape[0], self.n_batches))
+        y = y.to(x.device)
         z_plus_y = torch.column_stack((z, y))
         x_star = self.decoder(z_plus_y)
         return x_star
@@ -73,7 +74,15 @@ class AEGAN():
         self.model = AEGANModule(n_features, n_batches, n_latent, n_hidden)
         
         
-        
+    def loss_fn(x, y, x_pred, y_pred):
+        rec_loss  = nn.MSELoss()(x_pred, x)
+        disc_loss = nn.CrossEntropyLoss()(y_pred, y)
+        loss = rec_loss - regularization * disc_loss
+        metrics = {'rec_loss'  : rec_loss,
+                   'disc_loss' : disc_loss,
+                   'loss'      : loss}
+        return metrics
+    
     def train(self, train_data, device,
                 num_epochs = 1000,
                 batch_size=8,
@@ -92,15 +101,7 @@ class AEGAN():
                                           lr = discriminator_learning_rate,
                                           betas=(0.5, 0.9))
         self.optimizers = [optimizer_ae, optimizer_disc]
-        
-        def loss_fn(x, y, x_pred, y_pred):
-            rec_loss  = nn.MSELoss()(x_pred, x)
-            disc_loss = nn.CrossEntropyLoss()(y_pred, y)
-            loss = rec_loss - regularization * disc_loss
-            metrics = {'rec_loss'  : rec_loss,
-                       'disc_loss' : disc_loss,
-                       'loss'      : loss}
-            return metrics
+
         
         history = []
         self.model = self.model.to(device)
@@ -115,7 +116,7 @@ class AEGAN():
 
                 x_pred, y_pred = self.model.forward(x, y)
                 
-                metrics = loss_fn(x, y, x_pred, y_pred)
+                metrics = self.loss_fn(x, y, x_pred, y_pred)
                 
                 if epoch % 2 == 0:
                     loss = metrics['loss']
