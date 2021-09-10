@@ -168,7 +168,7 @@ class AEGAN():
                          'encoded'       : z,
                          'reconstructed' : x_pred,
                          'corrected'     : x_star}
-        model_outputs = {_ : x.cpu().detach().numpy() for (_, x) in model_outputs.items()}
+        model_outputs = {_ : x.detach().cpu().numpy() for (_, x) in model_outputs.items()}
         return model_outputs
 
         
