@@ -244,7 +244,7 @@ class AEGAN():
 class SupervisedAEGANModule(nn.Module):
     def __init__(self, n_features, n_batches, n_latent=100,
                 n_hidden = 2):
-        super(AEGANModule, self).__init__()
+        super(SupervisedAEGANModule, self).__init__()
         
         self.n_features = n_features
         self.n_batches  = n_batches
@@ -311,7 +311,7 @@ class SupervisedAEGAN():
         self.n_latent   = n_latent
         self.n_hidden   = n_hidden
         
-        self.model = AEGANModule(n_features, n_batches, n_latent, n_hidden)
+        self.model = SupervisedAEGANModule(n_features, n_batches, n_latent, n_hidden)
         
         
     
@@ -327,7 +327,8 @@ class SupervisedAEGAN():
     
         trainloader = torch.utils.data.DataLoader(train_data, shuffle=True, batch_size=batch_size)
 
-        optimizer_ae = torch.optim.Adam(itertools.chain(self.model.encoder.parameters(),
+        optimizer_ae = torch.optim.Adam(itertools.chain(self.model.latent_encoder.parameters(),
+                                                        self.model.batch_encoder.parameters(),
                                                         self.model.decoder.parameters()),
                                         lr = autoencoder_learning_rate,
                                         betas=(0.5, 0.9))

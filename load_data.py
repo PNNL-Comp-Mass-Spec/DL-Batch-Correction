@@ -38,7 +38,7 @@ def load_unlabeled_data(path_to_data):
     dataset = TensorDataset(x)
     return dataset, sampleNames, featureNames
     
-def load_labeled_data(path_to_data, path_to_labels, batch_size=16, test_size=0.5):
+def load_labeled_data(path_to_data, path_to_labels, test_size=0.5):
 
     # load expression data
     x = pd.read_csv(path_to_data, delimiter = '\t')
@@ -87,12 +87,11 @@ def load_labeled_data(path_to_data, path_to_labels, batch_size=16, test_size=0.5
     from torch.utils.data import DataLoader, Subset
     from sklearn.model_selection import train_test_split
 
-    TEST_SIZE = 0.5
     SEED = 42
 
     # generate indices: instead of the actual data we pass in integers instead
-    train_idx, test_idx, _, _ = train_test_split(
-        range(len(dataset))
+    train_idx, test_idx = train_test_split(
+        range(len(dataset)),
         test_size=test_size,
         random_state=SEED
     )
@@ -101,13 +100,8 @@ def load_labeled_data(path_to_data, path_to_labels, batch_size=16, test_size=0.5
     metadata['test_idx'] = test_idx
 
     # generate subset based on indices
-    train_split = Subset(data, train_idx)
-    test_split = Subset(data, test_idx)
-    # create batches
-    train_dataset = DataLoader(train_split, batch_size=batch_size, shuffle=True)
-    test_dataset = DataLoader(test_split, batch_size=batch_size, shuffle=True)
-    
-    
+    train_dataset = Subset(dataset, train_idx)
+    test_dataset = Subset(dataset, test_idx)
     return train_dataset, test_dataset, metadata
 
 def save_model_outputs(model, test_dataset, train_dataset, metadata, output_dir):
