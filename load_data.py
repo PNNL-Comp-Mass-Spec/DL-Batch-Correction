@@ -38,7 +38,7 @@ def load_unlabeled_data(path_to_data):
     dataset = TensorDataset(x)
     return dataset, sampleNames, featureNames
     
-def load_labeled_data(path_to_data, path_to_labels):
+def load_labeled_data(path_to_data, path_to_labels, batch_size=16, test_size=0.5):
 
     # load expression data
     x = pd.read_csv(path_to_data, delimiter = '\t')
@@ -77,16 +77,36 @@ def load_labeled_data(path_to_data, path_to_labels):
     # gather metadata
     n_features   = len(dataset[0][:][0])
     n_batches    = len(torch.unique(dataset[:][1]))
+    
     metadata = {'featureNames':featureNames,
                 'sampleNames':sampleNames,
                 'n_features':n_features,
                 'n_batches':n_batches}
     
-    # partition into train and test sets
-    train_size = int(0.5 * len(dataset))
-    test_size  = len(dataset) - train_size
     
-    train_dataset, test_dataset = torch.utils.data.random_split(dataset, lengths=[train_size, test_size])
+    from torch.utils.data import DataLoader, Subset
+    from sklearn.model_selection import train_test_split
+
+    TEST_SIZE = 0.5
+    SEED = 42
+
+    # generate indices: instead of the actual data we pass in integers instead
+    train_idx, test_idx, _, _ = train_test_split(
+        range(len(dataset))
+        test_size=test_size,
+        random_state=SEED
+    )
+    
+    metadata['train_idx'] = train_idx
+    metadata['test_idx'] = test_idx
+
+    # generate subset based on indices
+    train_split = Subset(data, train_idx)
+    test_split = Subset(data, test_idx)
+    # create batches
+    train_dataset = DataLoader(train_split, batch_size=batch_size, shuffle=True)
+    test_dataset = DataLoader(test_split, batch_size=batch_size, shuffle=True)
+    
     
     return train_dataset, test_dataset, metadata
 
