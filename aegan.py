@@ -392,7 +392,7 @@ class SupervisedAEGAN():
         ax1.set_xlabel('Epoch')
         ax1.plot(history.T[0][tmin:tmax],
                  label='Reconstruction error')
-        ax1.plot(history.T[1][tmin:tmax] - np.log(self.n_batches),
+        ax1.plot(history.T[1][tmin:tmax],
                  label='Supervised error')
         ax1.plot(history.T[2][tmin:tmax] - np.log(self.n_batches),
                  label='Classification error')
