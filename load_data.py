@@ -104,6 +104,57 @@ def load_labeled_data(path_to_data, path_to_labels, test_size=0.5):
     test_dataset = Subset(dataset, test_idx)
     return train_dataset, test_dataset, metadata
 
+
+def load_all_data(path_to_data, path_to_labels):
+
+    # load expression data
+    x = pd.read_csv(path_to_data, delimiter = '\t')
+    x = x.set_index('feature')
+    x.columns = x.columns.astype(str)
+    x = x.dropna()
+
+    featureNames = x.index
+    sampleNames  = x.columns
+    
+    # load labels
+    y = pd.read_csv(path_to_labels, delimiter = '\t')
+    y = y.set_index('sample')
+    y.index = y.index.astype(str)
+    
+    # convert labels to zero-indexed ints
+    y['batch'] = [pd.Index(pd.unique(y['batch'])).get_loc(i) for i in y['batch']]
+
+    # reorder to match expression data
+    y = y.reindex(x.columns)
+    
+    # convert to tensor
+    x = torch.tensor(x.values, dtype=torch.float64)
+    y = torch.tensor(y.values)
+    
+    # remove extra dimension
+    y = y.squeeze(1)
+    
+    # normalization
+    x = x.T.float()
+    mu = torch.mean(x, dim=0)
+    mu = mu.unsqueeze(1).repeat(1, x.shape[0])
+    mu = mu.T
+    x -= mu
+    
+    # join expression data with labels
+    dataset = TensorDataset(x, y)
+    
+    # gather metadata
+    n_features   = len(dataset[0][:][0])
+    n_batches    = len(torch.unique(dataset[:][1]))
+    
+    metadata = {'featureNames':featureNames,
+                'sampleNames':sampleNames,
+                'n_features':n_features,
+                'n_batches':n_batches}
+    
+    return dataset, metadata
+
 def save_model_outputs(model, test_dataset, train_dataset, metadata, output_dir):
     
     if not os.path.exists(output_dir):

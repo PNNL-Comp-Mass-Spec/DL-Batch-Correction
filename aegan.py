@@ -30,6 +30,7 @@ class AEGANModule(nn.Module):
     
     def multi_layer_perceptron(self, dims, dropout_p = 0.3):
             MLP = nn.Sequential()
+            
             for i in range(len(dims) - 1):
                 dim1, dim2 = dims[i], dims[i + 1]
                 MLP = nn.Sequential(MLP, nn.Linear(dim1, dim2))
@@ -38,6 +39,7 @@ class AEGANModule(nn.Module):
                                         nn.BatchNorm1d(dim2),
                                         nn.LeakyReLU(),
                                         nn.Dropout(p = dropout_p))
+                    
             return MLP
         
     def to_one_hot(self, y):
@@ -104,7 +106,7 @@ class AEGAN():
                        'loss'      : loss}
             return metrics
     
-        history = []
+        self.history = []
         self.model = self.model.to(device)
         t = trange(num_epochs,  position=0, leave=True)
         for epoch in t:
@@ -130,20 +132,19 @@ class AEGAN():
                 optimizer.step()
                     
                 epoch_history += [[metric.data.item() for metric in metrics.values()]]
-            history += [np.mean(epoch_history, axis=0)]
+            self.history += [np.mean(epoch_history, axis=0)]
             
             if verbose:
-                t.set_description('RecLoss: {:.4f} | DiscLoss: {:.4f}'.format(history[-1][0], history[-1][1]))
-
-        self.history = np.array(history)
+                t.set_description('RecLoss: {:.4f} | DiscLoss: {:.4f}'.format(self.history[-1][0],
+                                                                              self.history[-1][1]))
         
         
     def plot_history(self, tmin=0, tmax=None, file = None):
-        history = self.history
+        history = np.array(self.history)
         
         import matplotlib.pyplot as plt
         fig, (ax1) = plt.subplots(1, 1)
-        tmax = self.history.shape[0] if tmax is None else tmax
+        tmax = history.shape[0] if tmax is None else tmax
         ax1.set_xlabel('Epoch')
         ax1.plot(history.T[0][tmin:tmax],
                  label='Reconstruction error')
@@ -178,7 +179,8 @@ class AEGAN():
         from scipy.linalg import eigh
         import pandas as pd 
 
-        X = StandardScaler().fit_transform(data)
+        #X = StandardScaler().fit_transform(data)
+        X =data
         A = np.matmul(X.T , X)
 
         k = X.shape[1]
