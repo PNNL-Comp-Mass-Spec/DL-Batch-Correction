@@ -4,17 +4,30 @@ from torch import nn
 from torch.autograd import Variable
 
     
+class MLP(nn.Module):
+    def __init__(self, dims, dropout_p=0.3):
+        super(MLP, self).__init__()
+        
+        self.mlp = nn.Sequential()
+        for i in range(len(dims) - 1):
+            dim1, dim2 = dims[i], dims[i + 1]
+            self.mlp = nn.Sequential(self.mlp,
+                                     nn.Linear(dim1, dim2))
+            if i + 2 < len(dims):
+                self.mlp = nn.Sequential(self.mlp,
+                                         nn.BatchNorm1d(dim2),
+                                         nn.LeakyReLU(),
+                                         nn.Dropout(p = dropout_p))
+        
+    def forward(self, x):
+        return self.mlp(x)
     
 class BatchDiscriminator(nn.Module):
     def __init__(self, n_batches, n_latent=100):
         super(BatchDiscriminator, self).__init__()
         # TODO: use super() instead?
         self.classifier = nn.Sequential(
-            nn.Linear(n_latent, 50),
-            nn.BatchNorm1d(50),
-            nn.LeakyReLU(),
-            nn.Dropout(p = 0.3),
-            nn.Linear(50, n_batches),
+            MLP(dims=[n_latent, 50, n_batches]),
             nn.Softmax(dim = 1))
 
     def forward(self, x):
@@ -27,17 +40,7 @@ class Encoder(nn.Module):
     def __init__(self, n_features, n_latent=100):
         super(Encoder, self).__init__()
         
-        self.E = nn.Sequential(
-                nn.Linear(n_features, 500),
-                nn.BatchNorm1d(500),
-                nn.LeakyReLU(),
-                nn.Dropout(p=0.3),
-                nn.Linear(500, 500),
-                nn.BatchNorm1d(500),
-                nn.LeakyReLU(),
-                nn.Dropout(p=0.3),
-                nn.Linear(500, n_latent)
-          )
+        self.E = MLP(dims=[n_features, 1000, 1000, n_latent])
         self.training = True
         
     def forward(self, x):
