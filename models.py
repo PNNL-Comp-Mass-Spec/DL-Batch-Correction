@@ -97,6 +97,7 @@ class NormAE(nn.Module):
 
     def train(self, train_data, device, num_epochs = 1000, batch_size=8,
               lambda_schedule = [100, 0, 500, 1],
+              early_stopping = True, check_every = 100, 
               autoencoder_learning_rate = 2e-4,
               discriminator_learning_rate = 5e-3,
               verbose = True):
@@ -113,7 +114,6 @@ class NormAE(nn.Module):
         optimizers = [optimizer1, optimizer2]
         self.metrics = np.zeros((num_epochs, 3))
         t = trange(num_epochs) if verbose else range(num_epochs)
-        record_every = 100
         record_loss = np.Inf
         done = False
         for epoch in t:
@@ -131,7 +131,7 @@ class NormAE(nn.Module):
                 optimizers[i].step()
             if verbose:
                 t.set_description('Loss: {:.4f} | RecLoss: {:.4f} | DiscLoss: {:.4f}'.format(*self.metrics[epoch]))
-            if epoch % record_every == 0 and epoch > 0:
+            if early_stopping and epoch % check_every == 0 and epoch > 0:
                 metrics = self.metrics[0:epoch,:]
                 min_loss = np.min(metrics[:,0])
                 if min_loss < record_loss:
@@ -218,6 +218,7 @@ class scGen(nn.Module):
         return L_rec
 
     def train(self, train_data, device, num_epochs = 1000, batch_size=8,
+                early_stopping = True, check_every = 100, 
               learning_rate = 2e-4, verbose = True):
         trainloader = torch.utils.data.DataLoader(train_data,
                                                   shuffle = True,
@@ -229,7 +230,6 @@ class scGen(nn.Module):
         
         self.metrics = np.zeros(num_epochs)
         t = trange(num_epochs) if verbose else range(num_epochs)
-        record_every = 100
         record_loss = np.Inf
         done = False
         for epoch in t:
@@ -245,7 +245,7 @@ class scGen(nn.Module):
                 optimizer.step()
             if verbose:
                 t.set_description('RecLoss: {:.4f}'.format(self.metrics[epoch]))
-            if epoch % record_every == 0 and epoch > 0:
+            if early_stopping and epoch % check_every == 0 and epoch > 0:
                 metrics = self.metrics[0:epoch]
                 min_loss = np.min(metrics)
                 if min_loss < record_loss:
