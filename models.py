@@ -132,8 +132,8 @@ class NormAE(nn.Module):
             if verbose:
                 t.set_description('Loss: {:.4f} | RecLoss: {:.4f} | DiscLoss: {:.4f}'.format(*self.metrics[epoch]))
             if epoch % record_every == 0 and epoch > 0:
-                metrics = self.metrics[0:epoch,0]
-                min_loss = np.min(metrics)
+                metrics = self.metrics[0:epoch,:]
+                min_loss = np.min(metrics[:,0])
                 if min_loss < record_loss:
                     record_loss = min_loss
                 else:
@@ -166,7 +166,8 @@ class NormAE(nn.Module):
 
 class scGen(nn.Module):
     def __init__(self, n_features, n_batches, n_latent = 100,
-                encoder_width = 1000, encoder_hidden_layers = 2):
+                encoder_width = 1000, encoder_hidden_layers = 2,
+                verbose = True):
         super(scGen, self).__init__()
         
         self.n_features = n_features
