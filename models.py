@@ -230,7 +230,6 @@ class scGen(nn.Module):
         
         self.metrics = pd.DataFrame(np.zeros(num_epochs),
                                     columns=['L_rec'])
-                                    self.metrics = np.zeros(num_epochs)
         t = trange(num_epochs) if verbose else range(num_epochs)
         record_every = 100
         record_loss = np.Inf
