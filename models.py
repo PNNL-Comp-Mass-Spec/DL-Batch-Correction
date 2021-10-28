@@ -11,6 +11,9 @@ from tqdm import tqdm, trange
 import scipy.stats
 
 
+
+
+
 class MLP(nn.Module):
     def __init__(self, dims, dropout_p=0.3):
         super(MLP, self).__init__()
@@ -28,8 +31,6 @@ class MLP(nn.Module):
         
     def forward(self, x):
         return self.mlp(x)
-    
-    
 
 
 
@@ -131,13 +132,14 @@ class NormAE(nn.Module):
             if verbose:
                 t.set_description('Loss: {:.4f} | RecLoss: {:.4f} | DiscLoss: {:.4f}'.format(*self.metrics[epoch]))
             if epoch % record_every == 0 and epoch > 0:
-                min_loss = np.min(self.metrics[0:epoch,0])
+                metrics = self.metrics[0:epoch,0]
+                min_loss = np.min(metrics)
                 if min_loss < record_loss:
                     record_loss = min_loss
                 else:
-                    self.metrics = self.metrics[0:epoch]
+                    if verbose: print('Early stopping after {} epochs'.format(epoch))
+                    self.metrics = metrics
                     done = True
-                    
                     
     def plot_metrics(self, lambda_schedule = None):
         import matplotlib.pyplot as plt
@@ -159,9 +161,6 @@ class NormAE(nn.Module):
             axs[0].legend()
             axs[1].legend()
         return axs
-
-    
-          
 
 
 
@@ -246,11 +245,13 @@ class scGen(nn.Module):
             if verbose:
                 t.set_description('RecLoss: {:.4f}'.format(self.metrics[epoch]))
             if epoch % record_every == 0 and epoch > 0:
-                min_loss = np.min(self.metrics[0:epoch])
+                metrics = self.metrics[0:epoch]
+                min_loss = np.min(metrics)
                 if min_loss < record_loss:
                     record_loss = min_loss
                 else:
-                    self.metrics = self.metrics[0:epoch]
+                    if verbose: print('Early stopping after {} epochs'.format(epoch))
+                    self.metrics = metrics
                     done = True
                     
     def plot_metrics(self):
@@ -259,11 +260,10 @@ class scGen(nn.Module):
         axs.plot(self.metrics[:], label='Reconstruction loss')
         axs.legend()
         return axs
-                    
-                    
+
+
+
 class VAEGAN(nn.Module):
-    
-    
     def __init__(self, n_features, n_batches, n_latent=100):
         super(VAEGAN, self).__init__()
         
@@ -340,5 +340,3 @@ class VAEGAN(nn.Module):
         z_plus_y = torch.column_stack((z, y))
         x_star = self.decoder(z_plus_y)
         return x_star
-        
-        
