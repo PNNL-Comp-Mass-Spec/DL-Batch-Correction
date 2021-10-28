@@ -10,6 +10,7 @@ from torch.utils.data import DataLoader
 from tqdm import tqdm, trange
 import scipy.stats
 
+
 class MLP(nn.Module):
     def __init__(self, dims, dropout_p=0.3):
         super(MLP, self).__init__()
@@ -109,7 +110,8 @@ class NormAE(nn.Module):
                                       lr = discriminator_learning_rate,
                                       betas = (0.5, 0.9))
         optimizers = [optimizer1, optimizer2]
-        self.metrics = np.zeros((num_epochs, 3))
+        self.metrics = pd.DataFrame(np.zeros((num_epochs, 3),
+                                    columns=['L', 'L_rec', 'L_disc'])
         t = trange(num_epochs) if verbose else range(num_epochs)
         record_every = 100
         record_loss = np.Inf
@@ -136,7 +138,8 @@ class NormAE(nn.Module):
                 else:
                     self.metrics = self.metrics[0:epoch]
                     done = True
-
+                    
+                    
     def plot_metrics(self, lambda_schedule = None):
         import matplotlib.pyplot as plt
         metrics = self.metrics
@@ -157,6 +160,8 @@ class NormAE(nn.Module):
             axs[0].legend()
             axs[1].legend()
         return axs
+
+    
           
 
 
@@ -222,7 +227,10 @@ class scGen(nn.Module):
                                                       self.decoder.parameters()),
                                       lr = learning_rate,
                                       betas = (0.5, 0.9))
-        self.metrics = np.zeros(num_epochs)
+        
+        self.metrics = pd.DataFrame(np.zeros(num_epochs),
+                                    columns=['L_rec'])
+                                    self.metrics = np.zeros(num_epochs)
         t = trange(num_epochs) if verbose else range(num_epochs)
         record_every = 100
         record_loss = np.Inf
@@ -247,6 +255,13 @@ class scGen(nn.Module):
                 else:
                     self.metrics = self.metrics[0:epoch]
                     done = True
+                    
+    def plot_metrics(self):
+        import matplotlib.pyplot as plt
+        fig, axs = plt.subplots(figsize=(8,8))
+        axs.plot(self.metrics[:], label='Reconstruction loss')
+        axs.legend()
+        return axs
                     
                     
 class VAEGAN(nn.Module):
@@ -328,3 +343,5 @@ class VAEGAN(nn.Module):
         z_plus_y = torch.column_stack((z, y))
         x_star = self.decoder(z_plus_y)
         return x_star
+        
+        

@@ -21,7 +21,7 @@ def compute_pca(x, y):
     df = pd.DataFrame(data=T, columns=('PC1', 'PC2', 'label'))
     df['label'] = df['label'].astype('category')
     return df
-
+        
 def plot_several_pca(datasets, y):
     fig, axs = plt.subplots(1, len(datasets), figsize=(6*len(datasets), 6))
     for i in range(len(datasets)):
