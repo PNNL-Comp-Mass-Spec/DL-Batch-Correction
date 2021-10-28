@@ -110,7 +110,7 @@ class NormAE(nn.Module):
                                       lr = discriminator_learning_rate,
                                       betas = (0.5, 0.9))
         optimizers = [optimizer1, optimizer2]
-        self.metrics = pd.DataFrame(np.zeros((num_epochs, 3),
+        self.metrics = pd.DataFrame(np.zeros((num_epochs, 3)),
                                     columns=['L', 'L_rec', 'L_disc'])
         t = trange(num_epochs) if verbose else range(num_epochs)
         record_every = 100
