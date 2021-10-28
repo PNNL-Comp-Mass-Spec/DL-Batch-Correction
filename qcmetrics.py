@@ -40,7 +40,6 @@ def plot_several_anova(datasets, y):
     for i in range(len(datasets)):
         key = list(datasets)[i]
         x = datasets[key]
-        y = labels
         f, p  = feature_selection.f_classif(x, y)
         ax = axs[i]
         ax.hist(p,
