@@ -90,13 +90,13 @@ class NormAE(nn.Module):
         lam = params
 
         L_rec  = nn.MSELoss()(x_rec, x)
-        L_disc = nn.CrossEntropyLoss()(y_pred, y)
+        L_disc = nn.CrossEntropyLoss()(y_pred, y) - np.log(self.n_batches)
         L = L_rec - lam * L_disc
 
         return L, L_rec, L_disc
 
     def train(self, train_data, device, num_epochs = 1000, batch_size=8,
-              lambda_schedule = [100, 0, 500, 1],
+              lambda_schedule = [100, 0, 500, 1], test_data = None,
               early_stopping = True, check_every = 100, 
               autoencoder_learning_rate = 2e-4,
               discriminator_learning_rate = 5e-3,
@@ -112,7 +112,7 @@ class NormAE(nn.Module):
                                       lr = discriminator_learning_rate,
                                       betas = (0.5, 0.9))
         optimizers = [optimizer1, optimizer2]
-        self.metrics = np.zeros((num_epochs, 3))
+        self.metrics = np.zeros((num_epochs, 6))
         t = trange(num_epochs) if verbose else range(num_epochs)
         record_loss = np.Inf
         done = False
@@ -126,14 +126,24 @@ class NormAE(nn.Module):
                 optimizers[i].zero_grad()
                 model_out = self.forward(device, minibatch)
                 L, L_rec, L_disc = self.objective(minibatch, model_out, lam)
-                ((1-i)*L + i*L_disc).backward()
-                self.metrics[epoch] += torch.tensor([L.data, L_rec.data, L_disc.data]).cpu().numpy()
+                if i == 0:
+                    L.backward()
+                elif i == 1:
+                    L_disc.backward()
+                self.metrics[epoch] += torch.tensor([L.data, L_rec.data, L_disc.data, 0, 0, 0]).cpu().numpy()
                 optimizers[i].step()
+            if test_data is not None:
+                x, y = test_data[:]
+                testbatch = x.to(device), y.to(device)
+                model_out = self.forward(device, testbatch)
+                L, L_rec, L_disc = self.objective(testbatch, model_out, lam)
+                self.metrics[epoch] += torch.tensor([0, 0, 0, L.data, L_rec.data, L_disc.data]).cpu().numpy()
             if verbose:
-                t.set_description('Loss: {:.4f} | RecLoss: {:.4f} | DiscLoss: {:.4f}'.format(*self.metrics[epoch]))
+                t.set_description(('TrainLoss: {:.3f} (RecLoss={:.3f}, DiscLoss={:.3f}) | ' +
+                                   'TestLoss: {:.3f} (RecLoss={:.3f}, DiscLoss={:.3f})').format(*self.metrics[epoch]))
             if early_stopping and epoch % check_every == 0 and epoch > 0:
                 metrics = self.metrics[0:epoch,:]
-                min_loss = np.min(metrics[:,0])
+                min_loss = np.min(metrics[:,3])
                 if min_loss < record_loss:
                     record_loss = min_loss
                 else:
@@ -141,31 +151,35 @@ class NormAE(nn.Module):
                     self.metrics = metrics
                     done = True
                     
-    def plot_metrics(self, lambda_schedule = None):
+    def plot_metrics(self, lambda_schedule):
         import matplotlib.pyplot as plt
         metrics = self.metrics
-        if lambda_schedule is None:
-            fig, axs = plt.subplots(figsize=(8,8))
-            axs.plot(metrics[:,0], label='Reconstruction loss')
-            axs.plot(metrics[:,1], label='Discriminator loss')
-            axs.plot(metrics[:,2], label='Weighted loss')
-            axs.legend()
-        else:
-            T = np.arange(len(metrics))
-            lam = np.array([self.compute_lambda(lambda_schedule, t) for t in T])
-            fig, axs = plt.subplots(2, figsize=(8,8))
-            axs[0].plot(metrics[:,0], label='Reconstruction loss')
-            axs[0].plot(metrics[:,1], label='Discriminator loss')
-            axs[0].plot(metrics[:,2], label='Weighted loss')
-            axs[1].plot(T, lam, ':', label='Lambda schedule')
-            axs[0].legend()
-            axs[1].legend()
+        T = np.arange(len(metrics))
+        lam = np.array([self.compute_lambda(lambda_schedule, t) for t in T])
+        fig, axs = plt.subplots(3, 3, figsize=(8,8))
+        axs[0,0].plot(metrics[:,0], label='TrainLoss')
+        axs[0,1].plot(metrics[:,1], label='TrainRecLoss')
+        axs[0,2].plot(metrics[:,2], label='TrainDiscLoss')
+        axs[1,0].plot(metrics[:,3], label='TestLoss')
+        axs[1,1].plot(metrics[:,4], label='TestRecLoss')
+        axs[1,2].plot(metrics[:,5], label='TestDiscLoss')
+        axs[2,0].plot(T, lam, ':', label='Lambda')
+        axs[2,1].plot(T, lam, ':', label='Lambda')
+        axs[2,2].plot(T, lam, ':', label='Lambda')
+        axs[0,0].legend()
+        axs[0,1].legend()
+        axs[0,2].legend()
+        axs[1,0].legend()
+        axs[1,1].legend()
+        axs[1,2].legend()
+        axs[2,0].legend()
         return axs
 
 
 
 class scGen(nn.Module):
     def __init__(self, n_features, n_batches, n_latent = 100,
+                test_data = None,
                 encoder_width = 1000, encoder_hidden_layers = 2,
                 verbose = True):
         super(scGen, self).__init__()
@@ -218,7 +232,7 @@ class scGen(nn.Module):
         return L_rec
 
     def train(self, train_data, device, num_epochs = 1000, batch_size=8,
-                early_stopping = True, check_every = 100, 
+                test_data = None, early_stopping = True, check_every = 100, 
               learning_rate = 2e-4, verbose = True):
         trainloader = torch.utils.data.DataLoader(train_data,
                                                   shuffle = True,
@@ -228,9 +242,10 @@ class scGen(nn.Module):
                                       lr = learning_rate,
                                       betas = (0.5, 0.9))
         
-        self.metrics = np.zeros(num_epochs)
+        self.metrics = np.zeros((num_epochs, 2))
         t = trange(num_epochs) if verbose else range(num_epochs)
-        record_loss = np.Inf
+        if early_stopping:
+          record_loss = np.Inf
         done = False
         for epoch in t:
             if done:
@@ -241,13 +256,19 @@ class scGen(nn.Module):
                 model_out = self.forward(device, minibatch)
                 loss = self.objective(minibatch, model_out)
                 loss.backward()
-                self.metrics[epoch] += torch.tensor([loss.data]).cpu().numpy()
+                self.metrics[epoch] += torch.tensor([loss.data, 0]).cpu().numpy()
                 optimizer.step()
+            if test_data is not None:
+                x, y = test_data[:]
+                testbatch = x.to(device), y.to(device)
+                model_out = self.forward(device, testbatch)
+                loss = self.objective(testbatch, model_out)
+                self.metrics[epoch] += torch.tensor([0, loss.data]).cpu().numpy()
             if verbose:
-                t.set_description('RecLoss: {:.4f}'.format(self.metrics[epoch]))
+                t.set_description('TrainRecLoss: {:.3f} | TestRecLoss: {:.3f}'.format(*self.metrics[epoch]))
             if early_stopping and epoch % check_every == 0 and epoch > 0:
-                metrics = self.metrics[0:epoch]
-                min_loss = np.min(metrics)
+                metrics = self.metrics[0:epoch,:]
+                min_loss = np.min(metrics[:,1])
                 if min_loss < record_loss:
                     record_loss = min_loss
                 else:
@@ -257,9 +278,11 @@ class scGen(nn.Module):
                     
     def plot_metrics(self):
         import matplotlib.pyplot as plt
-        fig, axs = plt.subplots(figsize=(8,8))
-        axs.plot(self.metrics[:], label='Reconstruction loss')
-        axs.legend()
+        fig, axs = plt.subplots(2, figsize=(8,8))
+        axs[0].plot(self.metrics[:,0], label='TrainLoss')
+        axs[1].plot(self.metrics[:,1], label='TestLoss')
+        axs[0].legend()
+        axs[1].legend()
         return axs
 
 
