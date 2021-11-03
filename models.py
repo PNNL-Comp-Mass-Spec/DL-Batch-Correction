@@ -150,6 +150,9 @@ class NormAE(nn.Module):
                     if verbose: print('Early stopping after {} epochs'.format(epoch))
                     self.metrics = metrics
                     done = True
+        metrics = np.array(metrics)
+        return metrics
+
                     
     def plot_metrics(self, lambda_schedule):
         import matplotlib.pyplot as plt
