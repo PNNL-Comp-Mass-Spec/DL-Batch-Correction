@@ -21,12 +21,12 @@ def compute_pca(x):
     z = np.dot(eigenvector_subset.T, x.T)
     return z.T
         
-def plot_several_pca(datasets, y):
+def plot_several_pca(datasets):
     fig, axs = plt.subplots(1, len(datasets), figsize=(6*len(datasets), 6))
-    y = np.expand_dims(y, 1)
     for i in range(len(datasets)):
         key = list(datasets)[i]
-        x = datasets[key]
+        x, y = datasets[key]
+        y = np.expand_dims(y, 1)
         z = compute_pca(x)
         df = pd.DataFrame(np.concatenate([z, y], axis=1), columns = ['PC1','PC2','batch'])
         df['batch'] = df['batch'].astype('category')
@@ -45,13 +45,13 @@ def plot_several_pca(datasets, y):
         axs[i].set_title(key)
     return axs
 
-def plot_several_anova(datasets, y):
+def plot_several_anova(datasets):
     from sklearn import feature_selection
     fig, axs = plt.subplots(1, len(datasets), figsize=(6*len(datasets), 6))
 
     for i in range(len(datasets)):
         key = list(datasets)[i]
-        x = datasets[key]
+        x, y = datasets[key]
         f, p  = feature_selection.f_classif(x, y)
         ax = axs[i]
         ax.hist(p,
