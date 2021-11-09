@@ -271,4 +271,66 @@ def save_vaegan_outputs(model, test_dataset, train_dataset, metadata, output_dir
         df = pd.DataFrame(x_star.T, columns = sampleNames[idx], index = featureNames)
         df.to_csv(os.path.join(output_dir, 'corrected_{}_data.csv'.format(datatype)))
 
+        
+def make_labeled_dataset(x, y, batch = 'batch', test_size = 0.5, random_seed = 42):
+
+    # load expression data
+    
+    x.columns = x.columns.astype(str)
+    x = x.dropna() # TODO: warning message here
+
+    featureNames = x.index
+    sampleNames  = x.columns
+    
+    # load labels
+    y = y[[batch]]
+    y.index = y.index.astype(str)
+    
+    # convert labels to zero-indexed ints
+    y[batch] = [pd.Index(pd.unique(y[batch])).get_loc(i) for i in y[batch]]
+
+    # reorder to match expression data
+    y = y.reindex(x.columns) # TODO: warning message here
+    
+    # convert to tensor
+    x = torch.tensor(x.values, dtype=torch.float64)
+    y = torch.tensor(y.values)
+    
+    # remove extra dimension
+    y = y.squeeze(1)
+    
+    # normalization
+    x = x.T.float()
+    x = (x - torch.mean(x, dim=0)) / torch.sqrt(torch.var(x, dim=0))
+    
+    # join expression data with labels
+    dataset = TensorDataset(x, y)
+    
+    # gather metadata
+    n_features   = len(dataset[0][:][0])
+    n_batches    = len(torch.unique(dataset[:][1]))
+    
+    metadata = {'featureNames':featureNames,
+                'sampleNames':sampleNames,
+                'n_features':n_features,
+                'n_batches':n_batches}
+    
+    
+    from torch.utils.data import DataLoader, Subset
+    from sklearn.model_selection import train_test_split
+
+    # generate indices: instead of the actual data we pass in integers instead
+    train_idx, test_idx = train_test_split(
+        range(len(dataset)),
+        test_size=test_size,
+        random_state=random_seed
+    )
+    
+    metadata['train_idx'] = train_idx
+    metadata['test_idx'] = test_idx
+
+    # generate subset based on indices
+    train_dataset = Subset(dataset, train_idx)
+    test_dataset = Subset(dataset, test_idx)
+    return train_dataset, test_dataset, metadata
 
