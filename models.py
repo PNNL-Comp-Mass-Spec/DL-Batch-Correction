@@ -121,6 +121,7 @@ class NormAE(nn.Module):
                 break
             lam = self.compute_lambda(lambda_schedule, epoch)
             i = epoch % 2
+            self.training = True
             for x, y in trainloader:
                 minibatch = x.to(device), y.to(device)
                 optimizers[i].zero_grad()
@@ -130,8 +131,15 @@ class NormAE(nn.Module):
                     L.backward()
                 elif i == 1:
                     L_disc.backward()
-                self.metrics[epoch] += torch.tensor([L.data, L_rec.data, L_disc.data, 0, 0, 0]).cpu().numpy()
                 optimizers[i].step()
+                
+            self.training = False
+            x, y = train_data[:]
+            trainbatch = x.to(device), y.to(device)
+            model_out = self.forward(device, trainbatch)
+            L, L_rec, L_disc = self.objective(trainbatch, model_out, lam)
+            self.metrics[epoch] += torch.tensor([L.data, L_rec.data, L_disc.data, 0, 0, 0]).cpu().numpy()
+            
             if test_data is not None:
                 x, y = test_data[:]
                 testbatch = x.to(device), y.to(device)
@@ -250,14 +258,21 @@ class scGen(nn.Module):
         for epoch in t:
             if done:
                 break
+            self.training = True
             for x, y in trainloader:
                 minibatch = x.to(device), y.to(device)
                 optimizer.zero_grad()
                 model_out = self.forward(device, minibatch)
                 loss = self.objective(minibatch, model_out)
                 loss.backward()
-                self.metrics[epoch] += torch.tensor([loss.data, 0]).cpu().numpy()
                 optimizer.step()
+            self.training = False  
+            x, y = train_data[:]
+            trainbatch = x.to(device), y.to(device)
+            model_out = self.forward(device, trainbatch)
+            loss = self.objective(trainbatch, model_out)
+            self.metrics[epoch] = torch.tensor([loss.data, 0]).cpu().numpy()
+                
             if test_data is not None:
                 x, y = test_data[:]
                 testbatch = x.to(device), y.to(device)
