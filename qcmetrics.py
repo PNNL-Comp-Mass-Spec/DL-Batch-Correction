@@ -31,11 +31,6 @@ def plot_several_pca(datasets):
         df = pd.DataFrame(np.concatenate([z, y], axis=1), columns = ['PC1','PC2','batch'])
         df['batch'] = df['batch'].astype('category')
 
-        
-        sigmoid = lambda x: 1/(1+np.exp(-x/np.std(x)))
-        df['PC1'] = sigmoid(df['PC1'])
-        df['PC2'] = sigmoid(df['PC2'])
-
         ax = axs[i]
         sns.scatterplot(x='PC1', y='PC2', data=df, hue='batch', legend=False, ax=ax)
 
