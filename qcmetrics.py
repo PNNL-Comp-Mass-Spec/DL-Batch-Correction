@@ -34,9 +34,6 @@ def plot_several_pca(datasets):
         ax = axs[i]
         sns.scatterplot(x='PC1', y='PC2', data=df, hue='batch', legend=False, ax=ax)
 
-        ax.set_xlim([0,1])
-        ax.set_ylim([0,1])
-
         axs[i].set_title(key)
     return axs
 
