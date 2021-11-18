@@ -32,7 +32,163 @@ class MLP(nn.Module):
     def forward(self, x):
         return self.mlp(x)
 
+class Autoencoder(nn.Module):
+    def __init__(self, n_features, n_latent, test_data = None,
+                    network_width = 100, n_hidden_layers = 2,
+                    verbose = True):
+        super(Autoencoder, self).__init__()
+        self.n_features = n_features
+        self.n_latent = n_latent
+        
+        encoder_dims = [n_features] + n_hidden_layers * [network_width] + [n_latent]
+        decoder_dims = encoder_dims[::-1]
+        
+        self.encoder = MLP(encoder_dims)
+        self.decoder = MLP(decoder_dims)
+        self.training = True
 
+    def train(self, train_data, device, num_epochs = 1000, batch_size=8,
+                test_data = None, early_stopping = True, check_every = 100, 
+              learning_rate = 2e-4, verbose = True):
+        trainloader = torch.utils.data.DataLoader(train_data,
+                                                  shuffle = True,
+                                                  batch_size = batch_size)
+        optimizer = torch.optim.Adam(itertools.chain(self.encoder.parameters(),
+                                                      self.decoder.parameters()),
+                                      lr = learning_rate,
+                                      betas = (0.5, 0.9))
+        
+        self.metrics = np.zeros((num_epochs, 2))
+        t = trange(num_epochs) if verbose else range(num_epochs)
+        if early_stopping:
+          record_loss = np.Inf
+        done = False
+        criterion = nn.MSELoss()
+        for epoch in t:
+            if done:
+                break
+            self.training = True
+            for x in trainloader:
+                optimizer.zero_grad()
+                x = x.to(device)
+                z = self.encoder(x)
+                x_rec = self.decoder(z)
+                loss = criterion(x_rec, x)
+                loss.backward()
+                optimizer.step()
+
+            self.training = False  
+            x = train_data[:]
+            x = x.to(device)
+            z = self.encoder(x)
+            x_rec = self.decoder(z)
+            loss = criterion(x_rec, x)
+            self.metrics[epoch] = torch.tensor([loss.data, 0]).cpu().numpy()
+                
+            if test_data is not None:
+                x = test_data[:]
+                x = x.to(device)
+                z = self.encoder(x)
+                x_rec = self.decoder(z)
+                loss = criterion(x_rec, x)
+                self.metrics[epoch] += torch.tensor([0, loss.data]).cpu().numpy()
+            if verbose:
+                t.set_description('TrainLoss: {:.3f} | TestLoss: {:.3f}'.format(*self.metrics[epoch]))
+            if early_stopping and epoch % check_every == 0 and epoch > 0:
+                metrics = self.metrics[0:epoch,:]
+                min_loss = np.min(metrics[:,1])
+                if min_loss < record_loss:
+                    record_loss = min_loss
+                else:
+                    if verbose: print('Early stopping after {} epochs'.format(epoch))
+                    self.metrics = metrics
+                    done = True
+                    
+    def plot_metrics(self):
+        import matplotlib.pyplot as plt
+        fig, axs = plt.subplots(2, figsize=(8,8))
+        axs[0].plot(self.metrics[:,0], label='TrainLoss')
+        axs[1].plot(self.metrics[:,1], label='TestLoss')
+        axs[0].legend()
+        axs[1].legend()
+        return axs
+
+class Discriminator(nn.Module):
+    def __init__(self, n_features, n_batches, test_data = None,
+                network_width = 100, n_hidden_layers = 2,
+                verbose = True):
+        super(Discriminator, self).__init__()
+        
+        self.n_features = n_features
+        self.n_batches = n_batches
+        
+        dims = [n_features] + n_hidden_layers * [network_width] + [n_batches]
+        
+        self.discriminator = nn.Sequential(MLP(dims), nn.Softmax(dim = 1))
+
+        self.training = True
+
+    def train(self, train_data, device, num_epochs = 1000, batch_size=8,
+                test_data = None, early_stopping = True, check_every = 100, 
+              learning_rate = 2e-4, verbose = True):
+        trainloader = torch.utils.data.DataLoader(train_data,
+                                                  shuffle = True,
+                                                  batch_size = batch_size)
+        optimizer = torch.optim.Adam(self.discriminator.parameters(),
+                                      lr = learning_rate,
+                                      betas = (0.5, 0.9))
+        
+        self.metrics = np.zeros((num_epochs, 2))
+        t = trange(num_epochs) if verbose else range(num_epochs)
+        if early_stopping:
+          record_loss = np.Inf
+        done = False
+        criterion = nn.CrossEntropyLoss()
+        for epoch in t:
+            if done:
+                break
+            self.training = True
+            for x, y in trainloader:
+                x, y = x.to(device), y.to(device)
+                optimizer.zero_grad()
+                ypred = self.discriminator(x)
+                loss = criterion(ypred, y)
+                loss.backward()
+                optimizer.step()
+
+            self.training = False  
+            x, y = train_data[:]
+            x, y = x.to(device), y.to(device)
+            ypred = self.discriminator(x)
+            loss = criterion(ypred, y)
+            self.metrics[epoch] = torch.tensor([loss.data, 0]).cpu().numpy()
+                
+            if test_data is not None:
+                x, y = test_data[:]
+                x, y = x.to(device), y.to(device)
+                ypred = self.discriminator(x)
+                loss = criterion(ypred, y)
+                self.metrics[epoch] += torch.tensor([0, loss.data]).cpu().numpy()
+            if verbose:
+                t.set_description('TrainLoss: {:.3f} | TestLoss: {:.3f}'.format(*self.metrics[epoch]))
+            if early_stopping and epoch % check_every == 0 and epoch > 0:
+                metrics = self.metrics[0:epoch,:]
+                min_loss = np.min(metrics[:,1])
+                if min_loss < record_loss:
+                    record_loss = min_loss
+                else:
+                    if verbose: print('Early stopping after {} epochs'.format(epoch))
+                    self.metrics = metrics
+                    done = True
+                    
+    def plot_metrics(self):
+        import matplotlib.pyplot as plt
+        fig, axs = plt.subplots(2, figsize=(8,8))
+        axs[0].plot(self.metrics[:,0], label='TrainLoss')
+        axs[1].plot(self.metrics[:,1], label='TestLoss')
+        axs[0].legend()
+        axs[1].legend()
+        return axs
 
 class NormAE(nn.Module):
     def __init__(self, n_features, n_batches, n_latent = 100,
