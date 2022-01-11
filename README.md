@@ -13,18 +13,23 @@ A deep learning model for removing batch effects in microarray data.
 
 ### Input
 
-The data is assumed to be in matrix form with columns as samples and features as rows.
+The data is assumed to be in matrix form with columns as samples and features as rows, and `\t` delimiters.
 
+Expression matrix:
 ```
-python main.py --path_to_data .\data\emory\emory_data_clean.txt /
-  --path_to_labels .\data\emory\emory_batch_labels.txt /
-  --output_dir .\experiments\emory_normae_pipeline /
-  --num_epochs 1000 --batch_size 8
+feature   Sample_1 Sample_2 ... Sample_n
+Feature_1 -0.1661  -1.2160  ... -0.4630
+Feature_2 -1.7001  -0.06567 ...  0.8384
+...
+Feature_m -0.4630   0.8384  ... -0.8774
 ```
 
-### Output
-
-The above command will place two files in the output directory:
-
-- `loss.png`: a plot of loss vs. number of epochs
-- `output.cvs`: reconstructed input data
+Sample labels:
+```
+sample   group batch
+Sample_1 1     2
+Sample_2 1     1
+Sample_3 1     2
+...
+Sample_n 2     2
+...
