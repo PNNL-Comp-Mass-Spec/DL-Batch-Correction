@@ -32,4 +32,9 @@ Sample_2 1     1
 Sample_3 1     2
 ...
 Sample_n 2     2
-...
+```
+
+## Notebooks
+
+* [NormAE demo](https://colab.research.google.com/drive/1RLyh5yqNW8DD9vyjBL0pQoXOaqnTBAXO?usp=sharing)
+* [Peptide transformer](https://colab.research.google.com/drive/1GAh0lC1hI-DEFqzLxjaRbO4eRKshXwL3?usp=sharing)
