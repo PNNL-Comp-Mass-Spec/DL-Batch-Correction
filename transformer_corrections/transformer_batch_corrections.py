@@ -307,14 +307,14 @@ class Correction_peptide(nn.Module):
                 for x, mask, y, _ in self.testloader:
                     x, mask, y = x.clone().detach().to(self.device), mask.detach().to(self.device), y.clone().detach().to(self.device)
                     loss = objective(y - self.network(x, mask))
-                    test_loss += float(loss)
+                    test_loss += math.sqrt(float(loss))
 
                 for x, mask, y, _ in self.loader:
                     x, mask, y = x.clone().detach().to(self.device), mask.detach().to(self.device), y.clone().detach().to(self.device)
                     z = (y - self.network(x, mask)).detach().cpu()
                     p_v = test_batch_effect_fast(z, n_batches = self.n_batches, batch_size = self.batch_size)
                     loss = objective(y - self.network(x, mask))
-                    full_loss += float(loss)
+                    full_loss += math.sqrt(float(loss))
 
                     p_values = np.append(p_values, p_v)
                     data_corrected.append(z)
@@ -338,7 +338,7 @@ class Correction_peptide(nn.Module):
 
                 self.optimizer.zero_grad()
                 loss = objective(y - self.network(x, mask))
-                training_loss += float(loss)
+                training_loss += float(loss)math.sqrt(float(loss))
 
                 loss.backward()
                 self.optimizer.step()
@@ -478,7 +478,7 @@ class Correction_data(nn.Module):
                     n = len(y)
                     x = y.reshape(n, self.n_batches, self.batch_size).float()
                     loss = objective(y - self.network(x, mask))
-                    test_loss += float(loss)
+                    test_loss += math.sqrt(float(loss))
 
                 for _, _, y, mask in self.loader:
                     y, mask = y.clone().detach().to(self.device), mask.detach().to(self.device)
@@ -487,7 +487,7 @@ class Correction_data(nn.Module):
                     z = (y - self.network(x, mask)).detach().cpu()
                     p_v = test_batch_effect_fast(z, n_batches = self.n_batches, batch_size = self.batch_size)
                     loss = objective(y - self.network(x, mask))
-                    full_loss += float(loss)
+                    full_loss += math.sqrt(float(loss))
 
                     p_values = np.append(p_values, p_v)
                     data_corrected.append(z)
@@ -513,7 +513,7 @@ class Correction_data(nn.Module):
 
                 self.optimizer.zero_grad()
                 loss = objective(y - self.network(x, mask))
-                training_loss += float(loss)
+                training_loss += math.sqrt(float(loss))
 
                 loss.backward()
                 self.optimizer.step()
