@@ -573,22 +573,3 @@ class Correction_data(nn.Module):
 # testing(input[:,0:3,:], mask1)
 # testing(input, mask2)
 
-# def batch_correction_distance(batch_corrections, corrected_data, n_batches, batch_size, target):
-#     loss1 = kl_div(corrected_data, n_batches, batch_size, target)
-#     loss2 = torch.sum(batch_corrections**2)*0.007
-#     out = loss1 + loss2
-#     return(out)
-
-
-        
-# def amino_prediction(self, y, target_index):
-#     y = torch.tensor([[0,0,-float('inf'), 0,0],
-#               [1,2,3,4,5],
-#               [-float('inf'), -float('inf'), -float('inf'), -float('inf'), 3],
-#               [-float('inf'), -float('inf'), -float('inf'), -float('inf'), 2]])
-
-#     target_index = torch.tensor([[1], [2], [3], [4]])
-#     y = F.softmax(y, dim = 1)
-#     y = torch.gather(y, 1, target_index)
-
-#     loss = -log()
