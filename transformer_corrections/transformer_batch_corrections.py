@@ -338,7 +338,7 @@ class Correction_peptide(nn.Module):
 
                 self.optimizer.zero_grad()
                 loss = objective(y - self.network(x, mask))
-                training_loss += float(loss)math.sqrt(float(loss))
+                training_loss += math.sqrt(float(loss))
 
                 loss.backward()
                 self.optimizer.step()
