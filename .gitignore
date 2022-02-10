@@ -6,6 +6,9 @@ __pycache__/
 # C extensions
 *.so
 
+# Camilo Stuff
+/Camilo Tests/
+
 # Distribution / packaging
 .Python
 build/
@@ -129,3 +132,4 @@ dmypy.json
 .pyre/
 
 *~
+.Rproj.user
