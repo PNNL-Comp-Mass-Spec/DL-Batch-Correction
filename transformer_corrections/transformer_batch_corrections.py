@@ -284,7 +284,9 @@ class Correction_peptide(nn.Module):
         loss = torch.sum(y**2) / (self.n_batches * self.batch_size)
         return loss
 
-    def train_model(self, epochs, report_frequency = 50, objective = "batch_correction"):
+    def train_model(self, epochs, loss_cutoff, report_frequency = 50, objective = "batch_correction"):
+
+        train_complete = False
 
         train_loss_all = []
         test_loss_all = []
@@ -298,7 +300,7 @@ class Correction_peptide(nn.Module):
             print("Must input a valid objective")
 
         for epoch in range(epochs):
-            if (epoch % report_frequency == 0):
+            if ((epoch % report_frequency == 0) and not train_complete):
                 test_loss = 0
                 full_loss = 0
                 data_corrected = []
@@ -332,22 +334,26 @@ class Correction_peptide(nn.Module):
                 print("Epoch " + format(epoch) + " report : testing loss is " + format(test_loss) + 
                       " while full loss is " + format(full_loss) + "\n")
 
+                if (full_loss < loss_cutoff):
+                    train_complete = True
+
             training_loss = 0
-            for x, mask, y, _ in self.trainloader:
-                x, mask, y = x.clone().detach().to(self.device), mask.detach().to(self.device), y.clone().detach().to(self.device)
+            if(not train_complete):
+                for x, mask, y, _ in self.trainloader:
+                    x, mask, y = x.clone().detach().to(self.device), mask.detach().to(self.device), y.clone().detach().to(self.device)
 
-                self.optimizer.zero_grad()
-                loss = objective(y - self.network(x, mask))
-                training_loss += math.sqrt(float(loss))
+                    self.optimizer.zero_grad()
+                    loss = objective(y - self.network(x, mask))
+                    training_loss += math.sqrt(float(loss))
 
-                loss.backward()
-                self.optimizer.step()
+                    loss.backward()
+                    self.optimizer.step()
 
-            training_loss = training_loss / (self.train_n)
-            train_loss_all.append(training_loss)
-            print("Training loss is " + format(training_loss))
+                training_loss = training_loss / (self.train_n)
+                train_loss_all.append(training_loss)
+                print("Training loss is " + format(training_loss))
 
-            if (epoch % report_frequency == 0 and epoch > 0):
+            if (epoch % report_frequency == 0 and epoch > 0 and not train_complete):
                 plot_index = [j * report_frequency for j in range(len(test_loss_all))]
                 plt.plot(train_loss_all, label = 'Training loss')
                 plt.plot(plot_index, test_loss_all, label = 'Testing loss')
@@ -453,7 +459,9 @@ class Correction_data(nn.Module):
         return(loss)
 
 
-    def train_model(self, epochs, report_frequency = 50, objective = "batch_correction"):
+    def train_model(self, epochs, loss_cutoff, report_frequency = 50, objective = "batch_correction", run_name = ""):
+
+        train_complete = False
 
         train_loss_all = []
         test_loss_all = []
@@ -467,7 +475,7 @@ class Correction_data(nn.Module):
             print("Must input a valid objective")
 
         for epoch in range(epochs):
-            if (epoch % report_frequency == 0):
+            if ((epoch % report_frequency == 0) and not train_complete):
                 test_loss = 0
                 full_loss = 0
                 data_corrected = []
@@ -501,28 +509,32 @@ class Correction_data(nn.Module):
                 data_corrected = pd.DataFrame(data_corrected)
                 
                 make_report(data_corrected, p_values, n_batches = self.n_batches, 
-                            batch_size = self.batch_size, prefix = "All data", suffix = format(epoch))
+                            batch_size = self.batch_size, prefix = run_name + "All data", suffix = format(epoch))
                 print("Epoch " + format(epoch) + " report : testing loss is " + format(test_loss) + 
                       " while full loss is " + format(full_loss) + "\n")
 
+                if (full_loss < loss_cutoff):
+                    train_complete = True
+
             training_loss = 0
-            for _, _, y, mask in self.trainloader:
-                y, mask = y.clone().detach().to(self.device), mask.detach().to(self.device)
-                n = len(y)
-                x = y.reshape(n, self.n_batches, self.batch_size).float()
+            if (not train_complete):
+                for _, _, y, mask in self.trainloader:
+                    y, mask = y.clone().detach().to(self.device), mask.detach().to(self.device)
+                    n = len(y)
+                    x = y.reshape(n, self.n_batches, self.batch_size).float()
 
-                self.optimizer.zero_grad()
-                loss = objective(y - self.network(x, mask))
-                training_loss += math.sqrt(float(loss))
+                    self.optimizer.zero_grad()
+                    loss = objective(y - self.network(x, mask))
+                    training_loss += math.sqrt(float(loss))
 
-                loss.backward()
-                self.optimizer.step()
+                    loss.backward()
+                    self.optimizer.step()
 
-            training_loss = training_loss / (self.train_n)
-            train_loss_all.append(training_loss)
-            print("Training loss is " + format(training_loss))
+                training_loss = training_loss / (self.train_n)
+                train_loss_all.append(training_loss)
+                print("Training loss is " + format(training_loss))
 
-            if (epoch % report_frequency == 0 and epoch > 0):
+            if (epoch % report_frequency == 0 and epoch > 0 and not train_complete):
                 plot_index = [j * report_frequency for j in range(len(test_loss_all))]
                 plt.plot(train_loss_all, label = 'Training loss')
                 plt.plot(plot_index, test_loss_all, label = 'Testing loss')
