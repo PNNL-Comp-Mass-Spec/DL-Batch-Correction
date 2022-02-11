@@ -414,9 +414,8 @@ class Correction_peptide(nn.Module):
             data = self.CrossTab
         plot_title = plot_title + " batch means"
         
-        batch_density_plot(data = data, n_batches = self.n_batches, 
-                           batch_size = self.batch_size, 
-                           plot_title = plot_title, *args)
+        batch_density_plot(data, self.n_batches, self.batch_size, 
+                           plot_title, *args)
 
 
 
@@ -630,9 +629,8 @@ class Correction_data(nn.Module):
             data = self.CrossTab
         plot_title = plot_title + " batch means"
         
-        batch_density_plot(data = data, n_batches = self.n_batches, 
-                           batch_size = self.batch_size, 
-                           plot_title = plot_title, *args)
+        batch_density_plot(data, self.n_batches, self.batch_size, 
+                           plot_title, *args)
                           
             
 
@@ -856,7 +854,6 @@ def batchless_entropy_estimate(n_batches, batch_size, sample_size = 7000000):
     
 
 def batch_density_plot(data, n_batches, batch_size, plot_title, *args):
-    CrossTab = data
     plot_title = plot_title + " batch means"
     batches = args
 
@@ -864,7 +861,7 @@ def batch_density_plot(data, n_batches, batch_size, plot_title, *args):
     xx = xx.reshape(len(xx), n_batches, batch_size).mean(2)
     batch_means = pd.DataFrame(xx.numpy())
     columns = batch_means.columns
-    batch_means['feature'] = CrossTab.index
+    batch_means['feature'] = data.index
     batch_means = batch_means.melt(id_vars = ['feature'], value_vars = batches,
                                   var_name = "batch", value_name = "batch_mean")
 
