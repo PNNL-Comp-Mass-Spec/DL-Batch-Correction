@@ -7,6 +7,7 @@ import pandas as pd
 import statsmodels.api as sm
 import matplotlib.pyplot as plt
 import torch.nn.functional as F
+import seaborn as sns
 
 from torch import nn
 from torch.utils.data import DataLoader, TensorDataset, Subset
@@ -220,6 +221,7 @@ class Correction_peptide(nn.Module):
         super().__init__()
 
         self.CrossTab = CrossTab
+        self.corrected_data = CrossTab
         
         ## Data embedding
         self.TRAIN_DATA, self.TEST_DATA, self.FULL_DATA, self.METADATA = make_dataset_transformer(CrossTab = CrossTab, 
@@ -259,7 +261,10 @@ class Correction_peptide(nn.Module):
 
 
     ## Distance based on batch effect present in data y.
-    def objective_kldiv(self, y):
+    def objective_kldiv(self, original_data, batch_corrections):
+        y = original_data - batch_corrections
+        z = batch_corrections
+
         length = len(y)
         y_mean = torch.mean(y, 1).view(length, 1).repeat_interleave(self.n_batches * self.batch_size, 1)
 
@@ -276,15 +281,16 @@ class Correction_peptide(nn.Module):
         p = torch.distributions.FisherSnedecor(df1 = K-1, df2 = N-K)
         log_F = p.log_prob(F_stat)
 
-        loss = torch.sum(log_F - self.target)**2
-        return(loss)
+        loss_kl = torch.sum(log_F - self.target)**2
+        loss_reg = 50 * torch.sum(z**2)
+        return(loss_kl + loss_reg)
 
     ## Computes mse. y should be 'prediction - data'.
     def objective_mse(self, y):
         loss = torch.sum(y**2) / (self.n_batches * self.batch_size)
         return loss
 
-    def train_model(self, epochs, loss_cutoff, report_frequency = 50, objective = "batch_correction"):
+    def train_model(self, epochs, loss_cutoff, report_frequency = 50, objective = "batch_correction", run_name = ""):
 
         train_complete = False
 
@@ -308,14 +314,14 @@ class Correction_peptide(nn.Module):
                 
                 for x, mask, y, _ in self.testloader:
                     x, mask, y = x.clone().detach().to(self.device), mask.detach().to(self.device), y.clone().detach().to(self.device)
-                    loss = objective(y - self.network(x, mask))
+                    loss = objective(y, self.network(x, mask))
                     test_loss += math.sqrt(float(loss))
 
                 for x, mask, y, _ in self.loader:
                     x, mask, y = x.clone().detach().to(self.device), mask.detach().to(self.device), y.clone().detach().to(self.device)
                     z = (y - self.network(x, mask)).detach().cpu()
                     p_v = test_batch_effect_fast(z, n_batches = self.n_batches, batch_size = self.batch_size)
-                    loss = objective(y - self.network(x, mask))
+                    loss = objective(y, self.network(x, mask))
                     full_loss += math.sqrt(float(loss))
 
                     p_values = np.append(p_values, p_v)
@@ -330,7 +336,7 @@ class Correction_peptide(nn.Module):
                 data_corrected = pd.DataFrame(data_corrected)
                 
                 make_report(data_corrected, p_values, n_batches = self.n_batches, 
-                            batch_size = self.batch_size, prefix = "All data", suffix = format(epoch))
+                            batch_size = self.batch_size, prefix = run_name + " All data", suffix = format(epoch))
                 print("Epoch " + format(epoch) + " report : testing loss is " + format(test_loss) + 
                       " while full loss is " + format(full_loss) + "\n")
 
@@ -343,11 +349,10 @@ class Correction_peptide(nn.Module):
                     x, mask, y = x.clone().detach().to(self.device), mask.detach().to(self.device), y.clone().detach().to(self.device)
 
                     self.optimizer.zero_grad()
-                    loss = objective(y - self.network(x, mask))
-                    training_loss += math.sqrt(float(loss))
-
+                    loss = objective(y, self.network(x, mask))
                     loss.backward()
                     self.optimizer.step()
+                    training_loss += math.sqrt(float(loss))
 
                 training_loss = training_loss / (self.train_n)
                 train_loss_all.append(training_loss)
@@ -392,13 +397,67 @@ class Correction_peptide(nn.Module):
         return(p_values.transpose())
 
 
+    def correction_scatter(self):
+        plt.clf()
+        data_tensor = torch.tensor(self.CrossTab.values)
+        data_tensor = data_tensor.reshape(len(data_tensor), self.n_batches, self.batch_size)
+        data_means_og = torch.mean(data_tensor, 2)
+
+        data = self.CrossTab - self.corrected_data
+
+        data_tensor = torch.tensor(data.values)
+        data_tensor = data_tensor.reshape(len(data_tensor), self.n_batches, self.batch_size)
+        corrections = torch.mean(data_tensor, 2)
+
+        rows = math.floor(math.sqrt(self.n_batches))
+        cols = math.ceil(self.n_batches / rows)
+        fig, plots = plt.subplots(rows, cols, figsize = (15,10))
+        fig.suptitle('Batch Effect scatter plots')
+
+        for i in range(rows):
+            for j in range(cols):
+                plots[i, j].scatter(data_means_og[:, i*cols + j], corrections[:, i*cols + j])
+                plots[i, j].set_ylim(-1.5, 1.5)
+                plots[i, j].set_xlim(-1.5, 1.5)
+                plots[i, j].set_xlabel('Uncorrected batch mean')
+                plots[i, j].set_title("Batch " + format(i*cols + j) + " mean vs correction")
+                if (j == 0):
+                    plots[i, j].set_ylabel('Batch correction')
+
+
+    def batch_density_plot(self, *args, corrected = False):
+        if (corrected):
+            plot_title = "Corrected"
+            data = self.corrected_data
+        else:
+            plot_title = "Original"
+            data = self.CrossTab
+        plot_title = plot_title + " batch means"
+        batches = args
+
+        xx = torch.tensor(data.values)
+        xx = xx.reshape(len(xx), self.n_batches, self.batch_size).mean(2)
+        batch_means = pd.DataFrame(xx.numpy())
+        columns = batch_means.columns
+        batch_means['feature'] = CrossTab.index
+        batch_means = batch_means.melt(id_vars = ['feature'], value_vars = batches,
+                                      var_name = "batch", value_name = "batch_mean")
+
+        sns.kdeplot(data = batch_means, x = "batch_mean", hue = "batch", 
+                    cut = 0, fill = True, common_norm = False, alpha = 0.07,
+                    palette = "Set1").set(title = plot_title)
+
+
+
+
 class Correction_data(nn.Module):
     def __init__(self, CrossTab, depth, n_batches, batch_size, target, test_size, 
-                 minibatch_size, random_state, heads = 5, ff_mult = 5):
+                 minibatch_size, random_state, heads = 5, ff_mult = 5, train_on_all = False):
       
         super().__init__()
 
         self.CrossTab = CrossTab
+        self.corrected_data = CrossTab
         
         ## Data embedding
         self.TRAIN_DATA, self.TEST_DATA, self.FULL_DATA, self.METADATA = make_dataset_transformer(CrossTab = CrossTab, 
@@ -407,8 +466,16 @@ class Correction_data(nn.Module):
                                                                                                   test_size = test_size, 
                                                                                                   random_state = random_state)
         
-        self.trainloader = torch.utils.data.DataLoader(self.TRAIN_DATA, shuffle = True, 
-                                                       batch_size = minibatch_size)
+        if (train_on_all):
+            print("Will train on the entire dataset.\n")
+            self.trainloader = torch.utils.data.DataLoader(self.FULL_DATA, shuffle = True, 
+                                                          batch_size = minibatch_size)
+            self.train_n = len(self.FULL_DATA)
+        else:
+            self.trainloader = torch.utils.data.DataLoader(self.TRAIN_DATA, shuffle = True, 
+                                                          batch_size = minibatch_size)
+            self.train_n = len(self.TRAIN_DATA)
+        
         self.testloader = torch.utils.data.DataLoader(self.TEST_DATA, shuffle = False, 
                                                       batch_size = minibatch_size)
         self.loader = torch.utils.data.DataLoader(self.FULL_DATA, shuffle = False, 
@@ -419,7 +486,6 @@ class Correction_data(nn.Module):
         self.n_batches = n_batches
         self.target = target
         self.test_n = len(self.TEST_DATA)
-        self.train_n = len(self.TRAIN_DATA)
         self.data_n = len(self.FULL_DATA)
 
         ## The network
@@ -438,7 +504,10 @@ class Correction_data(nn.Module):
 
 
     ## Distance based on batch effect present in data y.
-    def objective_kldiv(self, y):
+    def objective_kldiv(self, original_data, batch_corrections):
+        y = original_data - batch_corrections
+        z = batch_corrections
+
         length = len(y)
         y_mean = torch.mean(y, 1).view(length, 1).repeat_interleave(self.n_batches * self.batch_size, 1)
 
@@ -455,11 +524,12 @@ class Correction_data(nn.Module):
         p = torch.distributions.FisherSnedecor(df1 = K-1, df2 = N-K)
         log_F = p.log_prob(F_stat)
 
-        loss = torch.sum(log_F - self.target)**2
-        return(loss)
+        loss_kl = torch.sum(log_F - self.target)**2
+        loss_reg = 50 * torch.sum(z**2)
+        return(loss_kl + loss_reg)
 
 
-    def train_model(self, epochs, loss_cutoff, report_frequency = 50, objective = "batch_correction", run_name = ""):
+    def train_model(self, epochs, loss_cutoff, report_frequency = 50, run_name = ""):
 
         train_complete = False
 
@@ -467,12 +537,7 @@ class Correction_data(nn.Module):
         test_loss_all = []
         full_loss_all = []
 
-        if (objective == "batch_correction"):
-            objective = self.objective_kldiv
-        elif (objective == "peptide_batch_prediction"):
-            objective  = self.objective_mse
-        else:
-            print("Must input a valid objective")
+        objective = self.objective_kldiv
 
         for epoch in range(epochs):
             if ((epoch % report_frequency == 0) and not train_complete):
@@ -485,7 +550,7 @@ class Correction_data(nn.Module):
                     y, mask = y.clone().detach().to(self.device), mask.detach().to(self.device)
                     n = len(y)
                     x = y.reshape(n, self.n_batches, self.batch_size).float()
-                    loss = objective(y - self.network(x, mask))
+                    loss = objective(y, self.network(x, mask))
                     test_loss += math.sqrt(float(loss))
 
                 for _, _, y, mask in self.loader:
@@ -494,7 +559,7 @@ class Correction_data(nn.Module):
                     x = y.reshape(n, self.n_batches, self.batch_size).float()
                     z = (y - self.network(x, mask)).detach().cpu()
                     p_v = test_batch_effect_fast(z, n_batches = self.n_batches, batch_size = self.batch_size)
-                    loss = objective(y - self.network(x, mask))
+                    loss = objective(y, self.network(x, mask))
                     full_loss += math.sqrt(float(loss))
 
                     p_values = np.append(p_values, p_v)
@@ -509,7 +574,7 @@ class Correction_data(nn.Module):
                 data_corrected = pd.DataFrame(data_corrected)
                 
                 make_report(data_corrected, p_values, n_batches = self.n_batches, 
-                            batch_size = self.batch_size, prefix = run_name + "All data", suffix = format(epoch))
+                            batch_size = self.batch_size, prefix = run_name + " All data", suffix = format(epoch))
                 print("Epoch " + format(epoch) + " report : testing loss is " + format(test_loss) + 
                       " while full loss is " + format(full_loss) + "\n")
 
@@ -524,11 +589,12 @@ class Correction_data(nn.Module):
                     x = y.reshape(n, self.n_batches, self.batch_size).float()
 
                     self.optimizer.zero_grad()
-                    loss = objective(y - self.network(x, mask))
-                    training_loss += math.sqrt(float(loss))
-
+                    loss = objective(y, self.network(x, mask))
                     loss.backward()
                     self.optimizer.step()
+                    #training_loss += float(loss)
+                    training_loss += math.sqrt(float(loss))
+
 
                 training_loss = training_loss / (self.train_n)
                 train_loss_all.append(training_loss)
@@ -576,7 +642,59 @@ class Correction_data(nn.Module):
         p_values = pd.DataFrame([p_values, self.METADATA['feature_names_og']])
         return(p_values.transpose())
 
+    
+    def correction_scatter(self):
+          plt.clf()
+          data_tensor = torch.tensor(self.CrossTab.values)
+          data_tensor = data_tensor.reshape(len(data_tensor), self.n_batches, self.batch_size)
+          data_means_og = torch.mean(data_tensor, 2)
 
+          data = self.CrossTab - self.corrected_data
+
+          data_tensor = torch.tensor(data.values)
+          data_tensor = data_tensor.reshape(len(data_tensor), self.n_batches, self.batch_size)
+          corrections = torch.mean(data_tensor, 2)
+
+          rows = math.floor(math.sqrt(self.n_batches))
+          cols = math.ceil(self.n_batches / rows)
+          fig, plots = plt.subplots(rows, cols, figsize = (15,10))
+          fig.suptitle('Batch Effect scatter plots')
+
+          for i in range(rows):
+              for j in range(cols):
+                  plots[i, j].scatter(data_means_og[:, i*cols + j], corrections[:, i*cols + j])
+                  plots[i, j].set_ylim(-1.5, 1.5)
+                  plots[i, j].set_xlim(-1.5, 1.5)
+                  plots[i, j].set_xlabel('Uncorrected batch mean')
+                  plots[i, j].set_title("Batch " + format(i*cols + j) + " mean vs correction")
+                  if (j == 0):
+                      plots[i, j].set_ylabel('Batch correction')
+
+
+
+    def batch_density_plot(self, *args, corrected = False):
+        if (corrected):
+            plot_title = "Corrected"
+            data = self.corrected_data
+        else:
+            plot_title = "Original"
+            data = self.CrossTab
+        plot_title = plot_title + " batch means"
+        batches = args
+
+        xx = torch.tensor(data.values)
+        xx = xx.reshape(len(xx), self.n_batches, self.batch_size).mean(2)
+        batch_means = pd.DataFrame(xx.numpy())
+        columns = batch_means.columns
+        batch_means['feature'] = CrossTab.index
+        batch_means = batch_means.melt(id_vars = ['feature'], value_vars = batches,
+                                      var_name = "batch", value_name = "batch_mean")
+
+        sns.kdeplot(data = batch_means, x = "batch_mean", hue = "batch", 
+                    cut = 0, fill = True, common_norm = False, alpha = 0.07,
+                    palette = "Set1").set(title = plot_title)
+                          
+            
 
 
 ######################################
@@ -721,6 +839,7 @@ def test_batch_effect(y, n_batches, batch_size):
     return(p_values)
 
 
+
 def test_batch_effect_fast(y, n_batches, batch_size):
     length = len(y)
     y_mean = torch.mean(y, 1).view(length, 1).repeat_interleave(n_batches * batch_size, 1)
@@ -741,8 +860,9 @@ def test_batch_effect_fast(y, n_batches, batch_size):
 
 
 
-
 def make_report(data, p_values, n_batches, batch_size, prefix = "", suffix = ""):
+    sns.set_style('whitegrid')
+    sns.set_palette('Set2')
     row_names = data.index
     col_names = data.columns
     data = pd.DataFrame(StandardScaler().fit_transform(data))
@@ -752,17 +872,24 @@ def make_report(data, p_values, n_batches, batch_size, prefix = "", suffix = "")
     pca = PCA(n_components=2)
     pca_components = pca.fit_transform(data)
 
-    colors = ["#F8766D", "#B79F00", "#00BA38", "#00BFC4", "#4A528E", "#F564E3", "#939496"]
-    sample_colors = [colors[i//batch_size] for i in range(batch_size * n_batches)]
+    sample_colors = [i//batch_size for i in range(batch_size * n_batches)]
+    sample_labels = [format(i + 1) for i in range(batch_size * n_batches)]
 
-    plt.scatter(pca_components[:, 0], pca_components[:, 1], c = sample_colors)
+    pca_plot = sns.scatterplot(pca_components[:, 0], pca_components[:, 1], 
+                               hue = sample_colors, palette = "Set2")
+    
     plot_title = prefix + " PCA plot by batch, epoch " + suffix
-    plt.title(plot_title)
-    plt.xlabel('PC1')
-    plt.ylabel('PC2')
-    path = "./pca_plots/" + plot_title + ".png"
-    plt.savefig(path)
+    pca_plot.set_title(plot_title)
+    pca_plot.set_xlabel('PC1')
+    pca_plot.set_xlabel('PC2')
+    plt.legend(bbox_to_anchor=(1.02, 1), loc = 2, borderaxespad = 0.)
 
+    for i, label in enumerate(sample_labels):
+        pca_plot.text(pca_components[i, 0], pca_components[i, 1], label, 
+                      fontsize = 8)
+
+    path = "./pca_plots/" + plot_title + ".png"
+    plt.savefig(path, bbox_inches = 'tight')
     plt.clf()
 
     plt.hist(p_values)
@@ -775,3 +902,5 @@ def make_report(data, p_values, n_batches, batch_size, prefix = "", suffix = "")
     plt.clf()
 
     return "Saved plots"
+
+
