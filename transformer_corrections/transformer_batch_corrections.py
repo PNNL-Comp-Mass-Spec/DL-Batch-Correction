@@ -215,7 +215,7 @@ class TransformNetAvg(nn.Module):
 
 
 class Correction_peptide(nn.Module):
-    def __init__(self, emb, depth, CrossTab, n_batches, batch_size, target, test_size, 
+    def __init__(self, emb, depth, CrossTab, n_batches, batch_size, batchless_entropy, test_size, 
                  minibatch_size, random_state, heads = 5, ff_mult = 5):
       
         super().__init__()
@@ -240,7 +240,7 @@ class Correction_peptide(nn.Module):
         ## Important self variables
         self.batch_size = batch_size
         self.n_batches = n_batches
-        self.target = target
+        self.batchless_entropy = batchless_entropy
         self.test_n = len(self.TEST_DATA)
         self.train_n = len(self.TRAIN_DATA)
         self.data_n = len(self.FULL_DATA)
@@ -281,7 +281,7 @@ class Correction_peptide(nn.Module):
         p = torch.distributions.FisherSnedecor(df1 = K-1, df2 = N-K)
         log_F = p.log_prob(F_stat)
 
-        loss_kl = torch.sum(log_F - self.target)**2
+        loss_kl = torch.sum(log_F - self.batchless_entropy)**2
         loss_reg = 50 * torch.sum(z**2)
         return(loss_kl + loss_reg)
 
@@ -451,7 +451,7 @@ class Correction_peptide(nn.Module):
 
 
 class Correction_data(nn.Module):
-    def __init__(self, CrossTab, depth, n_batches, batch_size, target, test_size, 
+    def __init__(self, CrossTab, depth, n_batches, batch_size, batchless_entropy, test_size, 
                  minibatch_size, random_state, heads = 5, ff_mult = 5, train_on_all = False):
       
         super().__init__()
@@ -484,7 +484,7 @@ class Correction_data(nn.Module):
         ## Important self variables
         self.batch_size = batch_size
         self.n_batches = n_batches
-        self.target = target
+        self.batchless_entropy = batchless_entropy
         self.test_n = len(self.TEST_DATA)
         self.data_n = len(self.FULL_DATA)
 
@@ -524,7 +524,7 @@ class Correction_data(nn.Module):
         p = torch.distributions.FisherSnedecor(df1 = K-1, df2 = N-K)
         log_F = p.log_prob(F_stat)
 
-        loss_kl = torch.sum(log_F - self.target)**2
+        loss_kl = torch.sum(log_F - self.batchless_entropy)**2
         loss_reg = 50 * torch.sum(z**2)
         return(loss_kl + loss_reg)
 
@@ -902,5 +902,8 @@ def make_report(data, p_values, n_batches, batch_size, prefix = "", suffix = "")
     plt.clf()
 
     return "Saved plots"
+
+
+
 
 
