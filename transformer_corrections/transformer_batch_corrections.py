@@ -215,8 +215,8 @@ class TransformNetAvg(nn.Module):
 
 
 class Correction_peptide(nn.Module):
-    def __init__(self, emb, depth, CrossTab, n_batches, batch_size, batchless_entropy, test_size, 
-                 minibatch_size, random_state, heads = 5, ff_mult = 5):
+    def __init__(self, CrossTab, emb, depth, n_batches, batch_size, test_size, minibatch_size, 
+                 random_state, heads = 5, ff_mult = 5):
       
         super().__init__()
 
@@ -240,10 +240,11 @@ class Correction_peptide(nn.Module):
         ## Important self variables
         self.batch_size = batch_size
         self.n_batches = n_batches
-        self.batchless_entropy = batchless_entropy
         self.test_n = len(self.TEST_DATA)
         self.train_n = len(self.TRAIN_DATA)
         self.data_n = len(self.FULL_DATA)
+        self.batchless_entropy = batchless_entropy_estimate(n_batches = self.n_batches,
+                                                    batch_size = self.batch_size)
 
         ## The network
         self.network = TransformNet(emb = emb, depth = depth, n_batches = n_batches, 
@@ -397,32 +398,11 @@ class Correction_peptide(nn.Module):
         return(p_values.transpose())
 
 
-    def correction_scatter(self):
-        plt.clf()
-        data_tensor = torch.tensor(self.CrossTab.values)
-        data_tensor = data_tensor.reshape(len(data_tensor), self.n_batches, self.batch_size)
-        data_means_og = torch.mean(data_tensor, 2)
-
-        data = self.CrossTab - self.corrected_data
-
-        data_tensor = torch.tensor(data.values)
-        data_tensor = data_tensor.reshape(len(data_tensor), self.n_batches, self.batch_size)
-        corrections = torch.mean(data_tensor, 2)
-
-        rows = math.floor(math.sqrt(self.n_batches))
-        cols = math.ceil(self.n_batches / rows)
-        fig, plots = plt.subplots(rows, cols, figsize = (15,10))
-        fig.suptitle('Batch Effect scatter plots')
-
-        for i in range(rows):
-            for j in range(cols):
-                plots[i, j].scatter(data_means_og[:, i*cols + j], corrections[:, i*cols + j])
-                plots[i, j].set_ylim(-1.5, 1.5)
-                plots[i, j].set_xlim(-1.5, 1.5)
-                plots[i, j].set_xlabel('Uncorrected batch mean')
-                plots[i, j].set_title("Batch " + format(i*cols + j) + " mean vs correction")
-                if (j == 0):
-                    plots[i, j].set_ylabel('Batch correction')
+    def scatter_comparison(self):
+        correction_scatter(original_data = self.CrossTab, 
+                           corrected_data = self.corrected_data, 
+                           n_batches = self.n_batches, 
+                           batch_size = self.batch_size)
 
 
     def batch_density_plot(self, *args, corrected = False):
@@ -433,26 +413,16 @@ class Correction_peptide(nn.Module):
             plot_title = "Original"
             data = self.CrossTab
         plot_title = plot_title + " batch means"
-        batches = args
-
-        xx = torch.tensor(data.values)
-        xx = xx.reshape(len(xx), self.n_batches, self.batch_size).mean(2)
-        batch_means = pd.DataFrame(xx.numpy())
-        columns = batch_means.columns
-        batch_means['feature'] = CrossTab.index
-        batch_means = batch_means.melt(id_vars = ['feature'], value_vars = batches,
-                                      var_name = "batch", value_name = "batch_mean")
-
-        sns.kdeplot(data = batch_means, x = "batch_mean", hue = "batch", 
-                    cut = 0, fill = True, common_norm = False, alpha = 0.07,
-                    palette = "Set1").set(title = plot_title)
-
+        
+        batch_density_plot(data = data, n_batches = self.n_batches, 
+                           batch_size = self.batch_size, 
+                           plot_title = plot_title, *args)
 
 
 
 class Correction_data(nn.Module):
-    def __init__(self, CrossTab, depth, n_batches, batch_size, batchless_entropy, test_size, 
-                 minibatch_size, random_state, heads = 5, ff_mult = 5, train_on_all = False):
+    def __init__(self, CrossTab, depth, n_batches, batch_size, test_size, minibatch_size, 
+                 random_state, heads = 5, ff_mult = 5, train_on_all = False):
       
         super().__init__()
 
@@ -484,9 +454,10 @@ class Correction_data(nn.Module):
         ## Important self variables
         self.batch_size = batch_size
         self.n_batches = n_batches
-        self.batchless_entropy = batchless_entropy
         self.test_n = len(self.TEST_DATA)
         self.data_n = len(self.FULL_DATA)
+        self.batchless_entropy = batchless_entropy_estimate(n_batches = self.n_batches,
+                                                    batch_size = self.batch_size)
 
         ## The network
         self.network = TransformNetAvg(emb = self.batch_size, seq_length = self.n_batches, depth = depth,
@@ -543,6 +514,7 @@ class Correction_data(nn.Module):
             if ((epoch % report_frequency == 0) and not train_complete):
                 test_loss = 0
                 full_loss = 0
+                training_loss = 0
                 data_corrected = []
                 p_values = []
                 
@@ -567,7 +539,7 @@ class Correction_data(nn.Module):
 
                 test_loss = test_loss / self.test_n
                 test_loss_all.append(test_loss)
-                full_loss = full_loss / (self.test_n + self.train_n)
+                full_loss = full_loss / self.data_n
                 full_loss_all.append(full_loss)
                 p_values = torch.tensor(p_values)
                 data_corrected = torch.cat(data_corrected).numpy()
@@ -592,11 +564,10 @@ class Correction_data(nn.Module):
                     loss = objective(y, self.network(x, mask))
                     loss.backward()
                     self.optimizer.step()
-                    #training_loss += float(loss)
                     training_loss += math.sqrt(float(loss))
 
 
-                training_loss = training_loss / (self.train_n)
+                training_loss = training_loss / self.train_n
                 train_loss_all.append(training_loss)
                 print("Training loss is " + format(training_loss))
 
@@ -643,33 +614,11 @@ class Correction_data(nn.Module):
         return(p_values.transpose())
 
     
-    def correction_scatter(self):
-          plt.clf()
-          data_tensor = torch.tensor(self.CrossTab.values)
-          data_tensor = data_tensor.reshape(len(data_tensor), self.n_batches, self.batch_size)
-          data_means_og = torch.mean(data_tensor, 2)
-
-          data = self.CrossTab - self.corrected_data
-
-          data_tensor = torch.tensor(data.values)
-          data_tensor = data_tensor.reshape(len(data_tensor), self.n_batches, self.batch_size)
-          corrections = torch.mean(data_tensor, 2)
-
-          rows = math.floor(math.sqrt(self.n_batches))
-          cols = math.ceil(self.n_batches / rows)
-          fig, plots = plt.subplots(rows, cols, figsize = (15,10))
-          fig.suptitle('Batch Effect scatter plots')
-
-          for i in range(rows):
-              for j in range(cols):
-                  plots[i, j].scatter(data_means_og[:, i*cols + j], corrections[:, i*cols + j])
-                  plots[i, j].set_ylim(-1.5, 1.5)
-                  plots[i, j].set_xlim(-1.5, 1.5)
-                  plots[i, j].set_xlabel('Uncorrected batch mean')
-                  plots[i, j].set_title("Batch " + format(i*cols + j) + " mean vs correction")
-                  if (j == 0):
-                      plots[i, j].set_ylabel('Batch correction')
-
+    def scatter_comparison(self):
+        correction_scatter(original_data = self.CrossTab, 
+                           corrected_data = self.corrected_data, 
+                           n_batches = self.n_batches, 
+                           batch_size = self.batch_size)
 
 
     def batch_density_plot(self, *args, corrected = False):
@@ -680,19 +629,10 @@ class Correction_data(nn.Module):
             plot_title = "Original"
             data = self.CrossTab
         plot_title = plot_title + " batch means"
-        batches = args
-
-        xx = torch.tensor(data.values)
-        xx = xx.reshape(len(xx), self.n_batches, self.batch_size).mean(2)
-        batch_means = pd.DataFrame(xx.numpy())
-        columns = batch_means.columns
-        batch_means['feature'] = CrossTab.index
-        batch_means = batch_means.melt(id_vars = ['feature'], value_vars = batches,
-                                      var_name = "batch", value_name = "batch_mean")
-
-        sns.kdeplot(data = batch_means, x = "batch_mean", hue = "batch", 
-                    cut = 0, fill = True, common_norm = False, alpha = 0.07,
-                    palette = "Set1").set(title = plot_title)
+        
+        batch_density_plot(data = data, n_batches = self.n_batches, 
+                           batch_size = self.batch_size, 
+                           plot_title = plot_title, *args)
                           
             
 
@@ -904,6 +844,60 @@ def make_report(data, p_values, n_batches, batch_size, prefix = "", suffix = "")
     return "Saved plots"
 
 
+def batchless_entropy_estimate(n_batches, batch_size, sample_size = 7000000):
+    N = batch_size * n_batches
+    K = n_batches
+
+    p = torch.distributions.FisherSnedecor(df1 = K-1, df2 = N-K)
+    F_stat = np.random.f(K-1, N-K, sample_size)
+    log_F = p.log_prob(torch.tensor(F_stat))
+    return(float(torch.mean(log_F)))
+
+    
+
+def batch_density_plot(data, n_batches, batch_size, plot_title, *args):
+    CrossTab = data
+    plot_title = plot_title + " batch means"
+    batches = args
+
+    xx = torch.tensor(data.values)
+    xx = xx.reshape(len(xx), n_batches, batch_size).mean(2)
+    batch_means = pd.DataFrame(xx.numpy())
+    columns = batch_means.columns
+    batch_means['feature'] = CrossTab.index
+    batch_means = batch_means.melt(id_vars = ['feature'], value_vars = batches,
+                                  var_name = "batch", value_name = "batch_mean")
+
+    sns.kdeplot(data = batch_means, x = "batch_mean", hue = "batch", 
+                cut = 0, fill = True, common_norm = False, alpha = 0.07,
+                palette = "Set1").set(title = plot_title)
 
 
+
+def correction_scatter(original_data, corrected_data, n_batches, batch_size):
+      plt.clf()
+      data_tensor = torch.tensor(original_data.values)
+      data_tensor = data_tensor.reshape(len(data_tensor), n_batches, batch_size)
+      data_means_og = torch.mean(data_tensor, 2)
+
+      data = original_data - corrected_data
+
+      data_tensor = torch.tensor(data.values)
+      data_tensor = data_tensor.reshape(len(data_tensor), n_batches, batch_size)
+      corrections = torch.mean(data_tensor, 2)
+
+      rows = math.floor(math.sqrt(n_batches))
+      cols = math.ceil(n_batches / rows)
+      fig, plots = plt.subplots(rows, cols, figsize = (15,10))
+      fig.suptitle('Batch Effect scatter plots')
+
+      for i in range(rows):
+          for j in range(cols):
+              plots[i, j].scatter(data_means_og[:, i*cols + j], corrections[:, i*cols + j])
+              plots[i, j].set_ylim(-1.5, 1.5)
+              plots[i, j].set_xlim(-1.5, 1.5)
+              plots[i, j].set_xlabel('Uncorrected batch mean')
+              plots[i, j].set_title("Batch " + format(i*cols + j) + " mean vs correction")
+              if (j == 0):
+                  plots[i, j].set_ylabel('Batch correction')
 
