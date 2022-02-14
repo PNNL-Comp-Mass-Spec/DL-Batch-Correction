@@ -373,18 +373,6 @@ class Correction_peptide(nn.Module):
         data_corrected_output = data_corrected_output.rename(columns = column_mapping)
         self.corrected_data = data_corrected_output
 
-    
-    def compute_batch_effect(self):
-        p_values = []
-        for x, mask, y, _ in self.loader:
-            y, z = self.compute_correction(x, mask, y)
-            p_v = test_batch_effect_fast(y.detach().cpu() - z.detach().cpu(), 
-                                         n_batches = self.n_batches, batch_size = self.batch_size)
-            p_values = np.append(p_values, p_v)
-
-        p_values = pd.DataFrame([p_values, self.METADATA['feature_names_og']])
-        return(p_values.transpose())
-
 
     def scatter_comparison(self):
         correction_scatter(original_data = self.CrossTab, 
@@ -557,18 +545,6 @@ class Correction_data(nn.Module):
         data_corrected_output = data_corrected_output.rename(columns = column_mapping)
         self.corrected_data = data_corrected_output
 
-
-    def compute_batch_effect(self):
-        p_values = []
-        for _, _, y, mask in self.loader:
-            y, z = self.compute_correction(y, mask)
-            p_v = test_batch_effect_fast(y.detach().cpu() - z.detach().cpu(), 
-                                         n_batches = self.n_batches, batch_size = self.batch_size)
-            p_values = np.append(p_values, p_v)
-
-        p_values = pd.DataFrame([p_values, self.METADATA['feature_names_og']])
-        return(p_values.transpose())
-
     
     def scatter_comparison(self):
         correction_scatter(original_data = self.CrossTab, 
@@ -718,6 +694,8 @@ def make_dataset_transformer(CrossTab, emb, n_batches, random_state, test_size =
 #################
 
 ## original_data and batch_corrections should be tensors of size (n_features, n_samples)
+## Main function assesing the batch effect present in a dataset. This compares the
+## F statistic distribution to the fisher distribution.
 def fisher_kldiv(original_data, batch_corrections, n_batches, batch_size, batchless_entropy):
     y = original_data - batch_corrections
     z = batch_corrections
@@ -743,6 +721,7 @@ def fisher_kldiv(original_data, batch_corrections, n_batches, batch_size, batchl
 
 
 ## Functions for testing batch effect
+## Slow method for testing batch effect. Here for sanity checks.
 def test_batch_effect(y, n_batches, batch_size):
     p_values = list()
 
@@ -757,9 +736,8 @@ def test_batch_effect(y, n_batches, batch_size):
     return(p_values)
 
 
-
+## y is a tensor of size (k, n_batches * batch_size)
 def test_batch_effect_fast(y, n_batches, batch_size):
-    ## y is a tensor of size (k, n_batches * batch_size)
     length = len(y)
     y_mean = torch.mean(y, 1).view(length, 1).repeat_interleave(n_batches * batch_size, 1)
 
@@ -780,7 +758,7 @@ def test_batch_effect_fast(y, n_batches, batch_size):
     return(p_values)    
 
 
-
+## Function to make a PCA plot and p-value histogram of the batch effect. Takes in a pandas df.
 def make_report(data, n_batches, batch_size, prefix = "", suffix = ""):
     sns.set_style('whitegrid')
     sns.set_palette('Set2')
@@ -886,4 +864,12 @@ def correction_scatter(original_data, corrected_data, n_batches, batch_size):
               plots[i, j].set_title("Batch " + format(i*cols + j) + " mean vs correction")
               if (j == 0):
                   plots[i, j].set_ylabel('Batch correction')
+
+
+def compute_batch_effect(data, n_batches, batch_size):
+    y = torch.tensor(data.copy().values)
+    p_values = test_batch_effect_fast(y, n_batches, batch_size)
+
+    p_values = pd.DataFrame([p_values, data.index])
+    return(p_values.transpose())
 
