@@ -215,7 +215,7 @@ class TransformNetAvg(nn.Module):
 
 
 class Correction_peptide(nn.Module):
-    def __init__(self, CrossTab, emb, depth, n_batches, batch_size, test_size, minibatch_size, 
+    def __init__(self, CrossTab, emb, depth, reg_factor, n_batches, batch_size, test_size, minibatch_size, 
                  random_state, heads = 5, ff_mult = 5):
       
         super().__init__()
@@ -238,6 +238,7 @@ class Correction_peptide(nn.Module):
                                                   batch_size = minibatch_size)
 
         ## Important self variables
+        self.reg_factor = reg_factor
         self.batch_size = batch_size
         self.n_batches = n_batches
         self.test_n = len(self.TEST_DATA)
@@ -268,7 +269,7 @@ class Correction_peptide(nn.Module):
                                   self.batch_size, 
                                   self.batchless_entropy)
   
-        reg_dist = 0 * torch.sum(batch_corrections**2)
+        reg_dist = self.reg_factor * torch.sum(batch_corrections**2)
         return(batch_dist + reg_dist)
 
 
@@ -396,7 +397,7 @@ class Correction_peptide(nn.Module):
 
 
 class Correction_data(nn.Module):
-    def __init__(self, CrossTab, depth, n_batches, batch_size, test_size, minibatch_size, 
+    def __init__(self, CrossTab, depth, reg_factor, n_batches, batch_size, test_size, minibatch_size, 
                  random_state, heads = 5, ff_mult = 5, train_on_all = False):
       
         super().__init__()
@@ -427,6 +428,7 @@ class Correction_data(nn.Module):
                                                   batch_size = minibatch_size)
 
         ## Important self variables
+        self.reg_factor = reg_factor
         self.batch_size = batch_size
         self.n_batches = n_batches
         self.test_n = len(self.TEST_DATA)
@@ -455,7 +457,7 @@ class Correction_data(nn.Module):
                                   self.batch_size, 
                                   self.batchless_entropy)
   
-        reg_dist = 0 * torch.sum(batch_corrections**2)
+        reg_dist = self.reg_factor * torch.sum(batch_corrections**2)
         return(batch_dist + reg_dist)
 
 
