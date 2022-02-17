@@ -266,9 +266,9 @@ class Correction_peptide(nn.Module):
         batch_dist = fisher_kldiv(original_data, batch_corrections, 
                                   self.n_batches, 
                                   self.batch_size, 
-                                  self.batchless_entropy)**2
+                                  self.batchless_entropy)
   
-        reg_dist = 50 * torch.sum(batch_corrections**2)
+        reg_dist = 0 * torch.sum(batch_corrections**2)
         return(batch_dist + reg_dist)
 
 
@@ -310,13 +310,13 @@ class Correction_peptide(nn.Module):
                 for x, mask, y, _ in self.testloader:
                     y, z = self.compute_correction(x, mask, y)
                     loss = objective(y, z)
-                    test_loss += math.sqrt(float(loss))
+                    test_loss += float(loss)
 
                 for x, mask, y, _ in self.loader:
                     y, z = self.compute_correction(x, mask, y)
                     loss = objective(y, z)
                     data_corrected.append(y-z)
-                    full_loss += math.sqrt(float(loss))
+                    full_loss += float(loss)
 
                 test_loss = test_loss / self.test_n
                 full_loss = full_loss / (self.test_n + self.train_n)
@@ -326,7 +326,7 @@ class Correction_peptide(nn.Module):
                 data_corrected = pd.DataFrame(data_corrected)
                 
                 make_report(data_corrected, n_batches = self.n_batches, batch_size = self.batch_size, 
-                            prefix = run_name + " All data", suffix = format(epoch))
+                            prefix = run_name + "all_data", suffix = format(epoch))
                 print("Epoch " + format(epoch) + " report : testing loss is " + format(test_loss) + 
                       " while full loss is " + format(full_loss) + "\n")
 
@@ -341,7 +341,7 @@ class Correction_peptide(nn.Module):
                     loss = objective(y, z)
                     loss.backward()
                     self.optimizer.step()
-                    training_loss += math.sqrt(float(loss))
+                    training_loss += float(loss)
 
                 training_loss = training_loss / (self.train_n)
                 train_loss_all.append(training_loss)
@@ -453,9 +453,9 @@ class Correction_data(nn.Module):
         batch_dist = fisher_kldiv(original_data, batch_corrections, 
                                   self.n_batches, 
                                   self.batch_size, 
-                                  self.batchless_entropy)**2
+                                  self.batchless_entropy)
   
-        reg_dist = 50 * torch.sum(batch_corrections**2)
+        reg_dist = 0 * torch.sum(batch_corrections**2)
         return(batch_dist + reg_dist)
 
 
@@ -479,12 +479,12 @@ class Correction_data(nn.Module):
                 for _, _, y, mask in self.testloader:
                     y, z = self.compute_correction(y, mask)
                     loss = self.objective(y, z)
-                    test_loss += math.sqrt(float(loss))
+                    test_loss += float(loss)
 
                 for _, _, y, mask in self.loader:
                     y, z = self.compute_correction(y, mask)
                     loss = self.objective(y, z)
-                    full_loss += math.sqrt(float(loss))
+                    full_loss += float(loss)
                     data_corrected.append(y-z)
 
                 test_loss = test_loss / self.test_n
@@ -495,7 +495,7 @@ class Correction_data(nn.Module):
                 data_corrected = pd.DataFrame(data_corrected)
                 
                 make_report(data_corrected, n_batches = self.n_batches, batch_size = self.batch_size, 
-                            prefix = run_name + " All data", suffix = format(epoch))
+                            prefix = run_name + "all_data", suffix = format(epoch))
                 print("Epoch " + format(epoch) + " report : testing loss is " + format(test_loss) + 
                       " while full loss is " + format(full_loss) + "\n")
 
@@ -511,7 +511,7 @@ class Correction_data(nn.Module):
                     loss = self.objective(y, z)
                     loss.backward()
                     self.optimizer.step()
-                    training_loss += math.sqrt(float(loss))
+                    training_loss += float(loss)
 
                 training_loss = training_loss / self.train_n
                 train_loss_all.append(training_loss)
@@ -779,7 +779,7 @@ def make_report(data, n_batches, batch_size, prefix = "", suffix = ""):
     pca_plot = sns.scatterplot(x = pca_components[:, 0], y = pca_components[:, 1], 
                                hue = sample_colors, palette = "Set2")
     
-    plot_title = prefix + " PCA plot by batch, epoch " + suffix
+    plot_title = prefix + "PCA_plot_by_batch_epoch_" + suffix
     pca_plot.set_title(plot_title)
     pca_plot.set_xlabel('PC1')
     pca_plot.set_xlabel('PC2')
@@ -795,7 +795,7 @@ def make_report(data, n_batches, batch_size, prefix = "", suffix = ""):
 
     p_values = test_batch_effect_fast(y, n_batches, batch_size)
     plt.hist(p_values)
-    plot_title = prefix + " p value histogram of batch effect, epoch " + suffix
+    plot_title = prefix + "p_value_histogram_batch_effect_epoch_" + suffix
     plt.title(plot_title)
     plt.ylabel('Count')
     plt.xlabel('p value')
