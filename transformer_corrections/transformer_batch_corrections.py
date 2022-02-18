@@ -238,6 +238,7 @@ class Correction_peptide(nn.Module):
                                                   batch_size = minibatch_size)
 
         ## Important self variables
+        self.seq_length = self.METADATA['max_pep_len']
         self.reg_factor = reg_factor
         self.batch_size = batch_size
         self.n_batches = n_batches
@@ -248,8 +249,8 @@ class Correction_peptide(nn.Module):
                                                     batch_size = self.batch_size)
 
         ## The network
-        self.network = TransformNet(emb = emb, depth = depth, n_batches = n_batches, 
-                                                batch_size = batch_size, heads = heads, ff_mult = ff_mult)
+        self.network = TransformNetAvg(emb = emb, seq_length = self.seq_length, depth = depth, n_batches = n_batches, 
+                                       batch_size = batch_size, heads = heads, ff_mult = ff_mult)
         
         ## The optimizers
         self.optimizer = torch.optim.Adam(self.network.parameters(), lr = 1e-4, betas = (0.9, 0.999))
@@ -263,40 +264,29 @@ class Correction_peptide(nn.Module):
 
 
     ## Distance based on batch effect present in data y.
-    def objective_kldiv(self, original_data, batch_corrections):
-        batch_dist = fisher_kldiv(original_data, batch_corrections, 
-                                  self.n_batches, 
-                                  self.batch_size, 
-                                  self.batchless_entropy)
-  
-        reg_dist = self.reg_factor * torch.sum(batch_corrections**2)
-        return(batch_dist + reg_dist)
+    def objective_kldiv(self, y, z):
+        loss_kl = fisher_kldiv(y-z, 
+                               self.n_batches, 
+                               self.batch_size, 
+                               self.batchless_entropy)
+        return loss_kl + self.reg_factor * torch.sum(z**2)
 
 
     ## Computes mse. y should be 'data - prediction'.
-    def objective_mse(self, original_data, batch_corrections):
-        y = original_data - batch_corrections
-        loss = torch.sum(y**2) / (self.n_batches * self.batch_size)
-        return loss
-
-
-    def compute_correction(self, x, mask, y):
-        x, mask, y = x.clone().detach().to(self.device), mask.detach().to(self.device), y.clone().detach().to(self.device)
-        z = self.network(x, mask)
-        return y, z
+    def objective_mse(self, y, z):
+        y = y - z
+        return torch.sum(y**2) / (self.n_batches * self.batch_size)
 
 
     def train_model(self, epochs, loss_cutoff, report_frequency = 50, objective = "batch_correction", run_name = ""):
-
         train_complete = False
-
         train_loss_all = []
         test_loss_all = []
         full_loss_all = []
 
         if (objective == "batch_correction"):
             objective = self.objective_kldiv
-        elif (objective == "peptide_batch_prediction"):
+        elif (objective == "mse"):
             objective  = self.objective_mse
         else:
             print("Must input a valid objective")
@@ -309,25 +299,27 @@ class Correction_peptide(nn.Module):
                 p_values = []
                 
                 for x, mask, y, _ in self.testloader:
-                    y, z = self.compute_correction(x, mask, y)
+                    x, mask = x.clone().detach().to(self.device), mask.detach().to(self.device) 
+                    y, z = y.clone().detach().to(self.device), self.network(x, mask)
                     loss = objective(y, z)
                     test_loss += float(loss)
 
                 for x, mask, y, _ in self.loader:
-                    y, z = self.compute_correction(x, mask, y)
+                    x, mask = x.clone().detach().to(self.device), mask.detach().to(self.device) 
+                    y, z = y.clone().detach().to(self.device), self.network(x, mask)
                     loss = objective(y, z)
-                    data_corrected.append(y-z)
+                    data_corrected.append((y-z).detach().cpu())
                     full_loss += float(loss)
 
                 test_loss = test_loss / self.test_n
                 full_loss = full_loss / (self.test_n + self.train_n)
                 test_loss_all.append(test_loss)
                 full_loss_all.append(full_loss)
-                data_corrected = torch.cat(data_corrected).cpu().detach().numpy()
+                data_corrected = torch.cat(data_corrected).detach().numpy()
                 data_corrected = pd.DataFrame(data_corrected)
                 
                 make_report(data_corrected, n_batches = self.n_batches, batch_size = self.batch_size, 
-                            prefix = run_name + "all_data", suffix = format(epoch))
+                            prefix = run_name + "all_data_", suffix = format(epoch))
                 print("Epoch " + format(epoch) + " report : testing loss is " + format(test_loss) + 
                       " while full loss is " + format(full_loss) + "\n")
 
@@ -338,7 +330,8 @@ class Correction_peptide(nn.Module):
             if(not train_complete):
                 for x, mask, y, _ in self.trainloader:
                     self.optimizer.zero_grad()
-                    y, z = self.compute_correction(x, mask, y)
+                    x, mask = x.clone().detach().to(self.device), mask.detach().to(self.device) 
+                    y, z = y.clone().detach().to(self.device), self.network(x, mask)
                     loss = objective(y, z)
                     loss.backward()
                     self.optimizer.step()
@@ -451,13 +444,13 @@ class Correction_data(nn.Module):
         self.network = self.network.to(self.device)
 
     ## Distance based on batch effect present in data y.
-    def objective(self, original_data, batch_corrections):
-        batch_dist = fisher_kldiv(original_data, batch_corrections, 
+    def objective(self, y, z):
+        batch_dist = fisher_kldiv(y-z, 
                                   self.n_batches, 
                                   self.batch_size, 
                                   self.batchless_entropy)
   
-        reg_dist = self.reg_factor * torch.sum(batch_corrections**2)
+        reg_dist = self.reg_factor * torch.sum(z**2)
         return(batch_dist + reg_dist)
 
 
@@ -497,7 +490,7 @@ class Correction_data(nn.Module):
                 data_corrected = pd.DataFrame(data_corrected)
                 
                 make_report(data_corrected, n_batches = self.n_batches, batch_size = self.batch_size, 
-                            prefix = run_name + "all_data", suffix = format(epoch))
+                            prefix = run_name + "all_data_", suffix = format(epoch))
                 print("Epoch " + format(epoch) + " report : testing loss is " + format(test_loss) + 
                       " while full loss is " + format(full_loss) + "\n")
 
@@ -567,8 +560,6 @@ class Correction_data(nn.Module):
         batch_density_plot(data, self.n_batches, self.batch_size, 
                            plot_title, *args)
                           
-            
-
 
 ######################################
 ## Testing masking in transformer chain
@@ -695,13 +686,11 @@ def make_dataset_transformer(CrossTab, emb, n_batches, random_state, test_size =
 
 #################
 
-## original_data and batch_corrections should be tensors of size (n_features, n_samples)
+## corrected_data should be tensor of size (n_features, n_samples)
 ## Main function assesing the batch effect present in a dataset. This compares the
 ## F statistic distribution to the fisher distribution.
-def fisher_kldiv(original_data, batch_corrections, n_batches, batch_size, batchless_entropy):
-    y = original_data - batch_corrections
-    z = batch_corrections
-
+def fisher_kldiv(corrected_data, n_batches, batch_size, batchless_entropy):
+    y = corrected_data
     length = len(y)
     y_mean = torch.mean(y, 1).view(length, 1).repeat_interleave(n_batches * batch_size, 1)
 
@@ -868,6 +857,8 @@ def correction_scatter(original_data, corrected_data, n_batches, batch_size):
                   plots[i, j].set_ylabel('Batch correction')
 
 
+## data is a CrossTab in pandas dataframe form, in the same format as when passed to the network.
+## samples from a single batch appear together in the columns, and same size batches
 def compute_batch_effect(data, n_batches, batch_size):
     y = torch.tensor(data.copy().values)
     p_values = test_batch_effect_fast(y, n_batches, batch_size)
