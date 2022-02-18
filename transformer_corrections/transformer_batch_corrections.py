@@ -215,7 +215,7 @@ class TransformNetAvg(nn.Module):
 
 
 class Correction_peptide(nn.Module):
-    def __init__(self, CrossTab, emb, depth, n_batches, batch_size, test_size, minibatch_size, 
+    def __init__(self, CrossTab, emb, depth, reg_factor, n_batches, batch_size, test_size, minibatch_size, 
                  random_state, heads = 5, ff_mult = 5):
       
         super().__init__()
@@ -238,6 +238,8 @@ class Correction_peptide(nn.Module):
                                                   batch_size = minibatch_size)
 
         ## Important self variables
+        self.seq_length = self.METADATA['max_pep_len']
+        self.reg_factor = reg_factor
         self.batch_size = batch_size
         self.n_batches = n_batches
         self.test_n = len(self.TEST_DATA)
@@ -247,8 +249,8 @@ class Correction_peptide(nn.Module):
                                                     batch_size = self.batch_size)
 
         ## The network
-        self.network = TransformNet(emb = emb, depth = depth, n_batches = n_batches, 
-                                                batch_size = batch_size, heads = heads, ff_mult = ff_mult)
+        self.network = TransformNetAvg(emb = emb, seq_length = self.seq_length, depth = depth, n_batches = n_batches, 
+                                       batch_size = batch_size, heads = heads, ff_mult = ff_mult)
         
         ## The optimizers
         self.optimizer = torch.optim.Adam(self.network.parameters(), lr = 1e-4, betas = (0.9, 0.999))
@@ -262,46 +264,29 @@ class Correction_peptide(nn.Module):
 
 
     ## Distance based on batch effect present in data y.
-    def objective_kldiv(self, original_data, batch_corrections):
-        y = original_data - batch_corrections
-        z = batch_corrections
+    def objective_kldiv(self, y, z):
+        loss_kl = fisher_kldiv(y-z, 
+                               self.n_batches, 
+                               self.batch_size, 
+                               self.batchless_entropy)
+        return loss_kl + self.reg_factor * torch.sum(z**2)
 
-        length = len(y)
-        y_mean = torch.mean(y, 1).view(length, 1).repeat_interleave(self.n_batches * self.batch_size, 1)
 
-        y_batch_mean = y.view(length, self.n_batches, self.batch_size)
-        y_batch_mean = torch.mean(y_batch_mean, 2).repeat_interleave(self.batch_size, 1)
+    ## Computes mse. y should be 'data - prediction'.
+    def objective_mse(self, y, z):
+        y = y - z
+        return torch.sum(y**2) / (self.n_batches * self.batch_size)
 
-        exp_var = torch.sum(torch.square(y_batch_mean - y_mean), 1)
-        unexp_var = torch.sum(torch.square(y - y_batch_mean), 1)
-
-        N = self.batch_size * self.n_batches
-        K = self.n_batches
-
-        F_stat = (exp_var/unexp_var) * ((N-K) / (K-1))
-        p = torch.distributions.FisherSnedecor(df1 = K-1, df2 = N-K)
-        log_F = p.log_prob(F_stat)
-
-        loss_kl = torch.sum(log_F - self.batchless_entropy)**2
-        loss_reg = 50 * torch.sum(z**2)
-        return(loss_kl + loss_reg)
-
-    ## Computes mse. y should be 'prediction - data'.
-    def objective_mse(self, y):
-        loss = torch.sum(y**2) / (self.n_batches * self.batch_size)
-        return loss
 
     def train_model(self, epochs, loss_cutoff, report_frequency = 50, objective = "batch_correction", run_name = ""):
-
         train_complete = False
-
         train_loss_all = []
         test_loss_all = []
         full_loss_all = []
 
         if (objective == "batch_correction"):
             objective = self.objective_kldiv
-        elif (objective == "peptide_batch_prediction"):
+        elif (objective == "mse"):
             objective  = self.objective_mse
         else:
             print("Must input a valid objective")
@@ -314,30 +299,27 @@ class Correction_peptide(nn.Module):
                 p_values = []
                 
                 for x, mask, y, _ in self.testloader:
-                    x, mask, y = x.clone().detach().to(self.device), mask.detach().to(self.device), y.clone().detach().to(self.device)
-                    loss = objective(y, self.network(x, mask))
-                    test_loss += math.sqrt(float(loss))
+                    x, mask = x.clone().detach().to(self.device), mask.detach().to(self.device) 
+                    y, z = y.clone().detach().to(self.device), self.network(x, mask)
+                    loss = objective(y, z)
+                    test_loss += float(loss)
 
                 for x, mask, y, _ in self.loader:
-                    x, mask, y = x.clone().detach().to(self.device), mask.detach().to(self.device), y.clone().detach().to(self.device)
-                    z = (y - self.network(x, mask)).detach().cpu()
-                    p_v = test_batch_effect_fast(z, n_batches = self.n_batches, batch_size = self.batch_size)
-                    loss = objective(y, self.network(x, mask))
-                    full_loss += math.sqrt(float(loss))
-
-                    p_values = np.append(p_values, p_v)
-                    data_corrected.append(z)
+                    x, mask = x.clone().detach().to(self.device), mask.detach().to(self.device) 
+                    y, z = y.clone().detach().to(self.device), self.network(x, mask)
+                    loss = objective(y, z)
+                    data_corrected.append((y-z).detach().cpu())
+                    full_loss += float(loss)
 
                 test_loss = test_loss / self.test_n
-                test_loss_all.append(test_loss)
                 full_loss = full_loss / (self.test_n + self.train_n)
+                test_loss_all.append(test_loss)
                 full_loss_all.append(full_loss)
-                p_values = torch.tensor(p_values)
-                data_corrected = torch.cat(data_corrected).numpy()
+                data_corrected = torch.cat(data_corrected).detach().numpy()
                 data_corrected = pd.DataFrame(data_corrected)
                 
-                make_report(data_corrected, p_values, n_batches = self.n_batches, 
-                            batch_size = self.batch_size, prefix = run_name + " All data", suffix = format(epoch))
+                make_report(data_corrected, n_batches = self.n_batches, batch_size = self.batch_size, 
+                            prefix = run_name + "all_data_", suffix = format(epoch))
                 print("Epoch " + format(epoch) + " report : testing loss is " + format(test_loss) + 
                       " while full loss is " + format(full_loss) + "\n")
 
@@ -347,13 +329,13 @@ class Correction_peptide(nn.Module):
             training_loss = 0
             if(not train_complete):
                 for x, mask, y, _ in self.trainloader:
-                    x, mask, y = x.clone().detach().to(self.device), mask.detach().to(self.device), y.clone().detach().to(self.device)
-
                     self.optimizer.zero_grad()
-                    loss = objective(y, self.network(x, mask))
+                    x, mask = x.clone().detach().to(self.device), mask.detach().to(self.device) 
+                    y, z = y.clone().detach().to(self.device), self.network(x, mask)
+                    loss = objective(y, z)
                     loss.backward()
                     self.optimizer.step()
-                    training_loss += math.sqrt(float(loss))
+                    training_loss += float(loss)
 
                 training_loss = training_loss / (self.train_n)
                 train_loss_all.append(training_loss)
@@ -378,24 +360,12 @@ class Correction_peptide(nn.Module):
 
             data_corrected_output.append(z)
 
-        data_corrected_output = torch.cat(data_corrected_output).numpy()
+        data_corrected_output = torch.cat(data_corrected_output).cpu().detach().numpy()
         data_corrected_output = pd.DataFrame(data_corrected_output)
         data_corrected_output.index = self.CrossTab.index
         column_mapping = dict(zip(data_corrected_output.columns, self.CrossTab.columns))
         data_corrected_output = data_corrected_output.rename(columns = column_mapping)
         self.corrected_data = data_corrected_output
-
-    
-    def compute_batch_effect(self):
-        p_values = []
-        for x, mask, y, _ in self.loader:
-            x, mask = x.clone().detach().to(self.device), mask.detach().to(self.device)
-            z = (y - self.network(x, mask)).detach().cpu()
-            p_v = test_batch_effect_fast(z, n_batches = self.n_batches, batch_size = self.batch_size)
-            p_values = np.append(p_values, p_v)
-
-        p_values = pd.DataFrame([p_values, self.METADATA['feature_names_og']])
-        return(p_values.transpose())
 
 
     def scatter_comparison(self):
@@ -420,7 +390,7 @@ class Correction_peptide(nn.Module):
 
 
 class Correction_data(nn.Module):
-    def __init__(self, CrossTab, depth, n_batches, batch_size, test_size, minibatch_size, 
+    def __init__(self, CrossTab, depth, reg_factor, n_batches, batch_size, test_size, minibatch_size, 
                  random_state, heads = 5, ff_mult = 5, train_on_all = False):
       
         super().__init__()
@@ -437,13 +407,13 @@ class Correction_data(nn.Module):
         
         if (train_on_all):
             print("Will train on the entire dataset.\n")
+            self.train_n = len(self.FULL_DATA)
             self.trainloader = torch.utils.data.DataLoader(self.FULL_DATA, shuffle = True, 
                                                           batch_size = minibatch_size)
-            self.train_n = len(self.FULL_DATA)
         else:
+            self.train_n = len(self.TRAIN_DATA)
             self.trainloader = torch.utils.data.DataLoader(self.TRAIN_DATA, shuffle = True, 
                                                           batch_size = minibatch_size)
-            self.train_n = len(self.TRAIN_DATA)
         
         self.testloader = torch.utils.data.DataLoader(self.TEST_DATA, shuffle = False, 
                                                       batch_size = minibatch_size)
@@ -451,6 +421,7 @@ class Correction_data(nn.Module):
                                                   batch_size = minibatch_size)
 
         ## Important self variables
+        self.reg_factor = reg_factor
         self.batch_size = batch_size
         self.n_batches = n_batches
         self.test_n = len(self.TEST_DATA)
@@ -472,80 +443,54 @@ class Correction_data(nn.Module):
         self.device = torch.device('cuda')
         self.network = self.network.to(self.device)
 
-
     ## Distance based on batch effect present in data y.
-    def objective_kldiv(self, original_data, batch_corrections):
-        y = original_data - batch_corrections
-        z = batch_corrections
+    def objective(self, y, z):
+        batch_dist = fisher_kldiv(y-z, 
+                                  self.n_batches, 
+                                  self.batch_size, 
+                                  self.batchless_entropy)
+  
+        reg_dist = self.reg_factor * torch.sum(z**2)
+        return(batch_dist + reg_dist)
 
-        length = len(y)
-        y_mean = torch.mean(y, 1).view(length, 1).repeat_interleave(self.n_batches * self.batch_size, 1)
 
-        y_batch_mean = y.view(length, self.n_batches, self.batch_size)
-        y_batch_mean = torch.mean(y_batch_mean, 2).repeat_interleave(self.batch_size, 1)
-
-        exp_var = torch.sum(torch.square(y_batch_mean - y_mean), 1)
-        unexp_var = torch.sum(torch.square(y - y_batch_mean), 1)
-
-        N = self.batch_size * self.n_batches
-        K = self.n_batches
-
-        F_stat = (exp_var/unexp_var) * ((N-K) / (K-1))
-        p = torch.distributions.FisherSnedecor(df1 = K-1, df2 = N-K)
-        log_F = p.log_prob(F_stat)
-
-        loss_kl = torch.sum(log_F - self.batchless_entropy)**2
-        loss_reg = 50 * torch.sum(z**2)
-        return(loss_kl + loss_reg)
+    def compute_correction(self, y, mask):
+        y, mask = y.clone().detach().to(self.device), mask.detach().to(self.device)
+        n = len(y)
+        x = y.reshape(n, self.n_batches, self.batch_size).float()
+        z = self.network(x, mask)
+        return y, z
 
 
     def train_model(self, epochs, loss_cutoff, report_frequency = 50, run_name = ""):
-
         train_complete = False
-
-        train_loss_all = []
-        test_loss_all = []
-        full_loss_all = []
-
-        objective = self.objective_kldiv
+        train_loss_all = test_loss_all = full_loss_all = []
 
         for epoch in range(epochs):
             if ((epoch % report_frequency == 0) and not train_complete):
-                test_loss = 0
-                full_loss = 0
-                training_loss = 0
+                test_loss = full_loss = 0
                 data_corrected = []
-                p_values = []
                 
                 for _, _, y, mask in self.testloader:
-                    y, mask = y.clone().detach().to(self.device), mask.detach().to(self.device)
-                    n = len(y)
-                    x = y.reshape(n, self.n_batches, self.batch_size).float()
-                    loss = objective(y, self.network(x, mask))
-                    test_loss += math.sqrt(float(loss))
+                    y, z = self.compute_correction(y, mask)
+                    loss = self.objective(y, z)
+                    test_loss += float(loss)
 
                 for _, _, y, mask in self.loader:
-                    y, mask = y.clone().detach().to(self.device), mask.detach().to(self.device)
-                    n = len(y)
-                    x = y.reshape(n, self.n_batches, self.batch_size).float()
-                    z = (y - self.network(x, mask)).detach().cpu()
-                    p_v = test_batch_effect_fast(z, n_batches = self.n_batches, batch_size = self.batch_size)
-                    loss = objective(y, self.network(x, mask))
-                    full_loss += math.sqrt(float(loss))
-
-                    p_values = np.append(p_values, p_v)
-                    data_corrected.append(z)
+                    y, z = self.compute_correction(y, mask)
+                    loss = self.objective(y, z)
+                    full_loss += float(loss)
+                    data_corrected.append(y-z)
 
                 test_loss = test_loss / self.test_n
-                test_loss_all.append(test_loss)
                 full_loss = full_loss / self.data_n
+                test_loss_all.append(test_loss)
                 full_loss_all.append(full_loss)
-                p_values = torch.tensor(p_values)
-                data_corrected = torch.cat(data_corrected).numpy()
+                data_corrected = torch.cat(data_corrected).cpu().detach().numpy()
                 data_corrected = pd.DataFrame(data_corrected)
                 
-                make_report(data_corrected, p_values, n_batches = self.n_batches, 
-                            batch_size = self.batch_size, prefix = run_name + " All data", suffix = format(epoch))
+                make_report(data_corrected, n_batches = self.n_batches, batch_size = self.batch_size, 
+                            prefix = run_name + "all_data_", suffix = format(epoch))
                 print("Epoch " + format(epoch) + " report : testing loss is " + format(test_loss) + 
                       " while full loss is " + format(full_loss) + "\n")
 
@@ -554,23 +499,21 @@ class Correction_data(nn.Module):
 
             training_loss = 0
             if (not train_complete):
+                ## The training is done here. 
                 for _, _, y, mask in self.trainloader:
-                    y, mask = y.clone().detach().to(self.device), mask.detach().to(self.device)
-                    n = len(y)
-                    x = y.reshape(n, self.n_batches, self.batch_size).float()
-
                     self.optimizer.zero_grad()
-                    loss = objective(y, self.network(x, mask))
+                    y, z = self.compute_correction(y, mask)
+                    loss = self.objective(y, z)
                     loss.backward()
                     self.optimizer.step()
-                    training_loss += math.sqrt(float(loss))
-
+                    training_loss += float(loss)
 
                 training_loss = training_loss / self.train_n
                 train_loss_all.append(training_loss)
                 print("Training loss is " + format(training_loss))
 
             if (epoch % report_frequency == 0 and epoch > 0 and not train_complete):
+                ## We also make a plot of the training, testing and full losses during training.
                 plot_index = [j * report_frequency for j in range(len(test_loss_all))]
                 plt.plot(train_loss_all, label = 'Training loss')
                 plt.plot(plot_index, test_loss_all, label = 'Testing loss')
@@ -582,35 +525,20 @@ class Correction_data(nn.Module):
                 plt.savefig(path)
                 plt.clf()
 
+        ## Finished loop, saving corrected data
         data_corrected_output = []
         for _, _, y, mask in self.loader:
-            y, mask = y.clone().detach().to(self.device), mask.detach().to(self.device)
-            n = len(y)
-            x = y.reshape(n, self.n_batches, self.batch_size).float()
-            z = (y - self.network(x, mask)).detach().cpu()
+            y, z = self.compute_correction(y, mask)
 
-            data_corrected_output.append(z)
+            data_corrected_output.append(y-z)
 
-        data_corrected_output = torch.cat(data_corrected_output).numpy()
+        ## Place corrected data into data frame
+        data_corrected_output = torch.cat(data_corrected_output).cpu().detach().numpy()
         data_corrected_output = pd.DataFrame(data_corrected_output)
         data_corrected_output.index = self.CrossTab.index
         column_mapping = dict(zip(data_corrected_output.columns, self.CrossTab.columns))
         data_corrected_output = data_corrected_output.rename(columns = column_mapping)
         self.corrected_data = data_corrected_output
-
-
-    def compute_batch_effect(self):
-        p_values = []
-        for _, _, y, mask in self.loader:
-            y, mask = y.clone().detach().to(self.device), mask.detach().to(self.device)
-            n = len(y)
-            x = y.reshape(n, self.n_batches, self.batch_size).float()
-            z = (y - self.network(x, mask)).detach().cpu()
-            p_v = test_batch_effect_fast(z, n_batches = self.n_batches, batch_size = self.batch_size)
-            p_values = np.append(p_values, p_v)
-
-        p_values = pd.DataFrame([p_values, self.METADATA['feature_names_og']])
-        return(p_values.transpose())
 
     
     def scatter_comparison(self):
@@ -632,8 +560,6 @@ class Correction_data(nn.Module):
         batch_density_plot(data, self.n_batches, self.batch_size, 
                            plot_title, *args)
                           
-            
-
 
 ######################################
 ## Testing masking in transformer chain
@@ -760,9 +686,33 @@ def make_dataset_transformer(CrossTab, emb, n_batches, random_state, test_size =
 
 #################
 
+## corrected_data should be tensor of size (n_features, n_samples)
+## Main function assesing the batch effect present in a dataset. This compares the
+## F statistic distribution to the fisher distribution.
+def fisher_kldiv(corrected_data, n_batches, batch_size, batchless_entropy):
+    y = corrected_data
+    length = len(y)
+    y_mean = torch.mean(y, 1).view(length, 1).repeat_interleave(n_batches * batch_size, 1)
+
+    y_batch_mean = y.view(length, n_batches, batch_size)
+    y_batch_mean = torch.mean(y_batch_mean, 2).repeat_interleave(batch_size, 1)
+
+    exp_var = torch.sum(torch.square(y_batch_mean - y_mean), 1)
+    unexp_var = torch.sum(torch.square(y - y_batch_mean), 1)
+
+    N = batch_size * n_batches
+    K = n_batches
+
+    F_stat = (exp_var/unexp_var) * ((N-K) / (K-1))
+    p = torch.distributions.FisherSnedecor(df1 = K-1, df2 = N-K)
+    log_F = p.log_prob(F_stat)
+
+    loss_kl = -torch.sum(log_F - batchless_entropy)
+    return loss_kl
 
 
 ## Functions for testing batch effect
+## Slow method for testing batch effect. Here for sanity checks.
 def test_batch_effect(y, n_batches, batch_size):
     p_values = list()
 
@@ -777,7 +727,7 @@ def test_batch_effect(y, n_batches, batch_size):
     return(p_values)
 
 
-
+## y is a tensor of size (k, n_batches * batch_size)
 def test_batch_effect_fast(y, n_batches, batch_size):
     length = len(y)
     y_mean = torch.mean(y, 1).view(length, 1).repeat_interleave(n_batches * batch_size, 1)
@@ -792,15 +742,19 @@ def test_batch_effect_fast(y, n_batches, batch_size):
     K = n_batches
 
     F_stat = (exp_var/unexp_var) * ((N-K) / (K-1))
+    # df2test = 10000
+    # p_values = 1 - fisher_dist.cdf(F_stat, dfn = K-1, dfd = df2test)
     p_values = 1 - fisher_dist.cdf(F_stat, dfn = K-1, dfd = N-K)
 
     return(p_values)    
 
 
-
-def make_report(data, p_values, n_batches, batch_size, prefix = "", suffix = ""):
+## Function to make a PCA plot and p-value histogram of the batch effect. Takes in a pandas df.
+def make_report(data, n_batches, batch_size, prefix = "", suffix = ""):
     sns.set_style('whitegrid')
     sns.set_palette('Set2')
+
+    y = torch.tensor(data.copy().values)
     row_names = data.index
     col_names = data.columns
     data = pd.DataFrame(StandardScaler().fit_transform(data))
@@ -813,10 +767,10 @@ def make_report(data, p_values, n_batches, batch_size, prefix = "", suffix = "")
     sample_colors = [i//batch_size for i in range(batch_size * n_batches)]
     sample_labels = [format(i + 1) for i in range(batch_size * n_batches)]
 
-    pca_plot = sns.scatterplot(pca_components[:, 0], pca_components[:, 1], 
+    pca_plot = sns.scatterplot(x = pca_components[:, 0], y = pca_components[:, 1], 
                                hue = sample_colors, palette = "Set2")
     
-    plot_title = prefix + " PCA plot by batch, epoch " + suffix
+    plot_title = prefix + "PCA_plot_by_batch_epoch_" + suffix
     pca_plot.set_title(plot_title)
     pca_plot.set_xlabel('PC1')
     pca_plot.set_xlabel('PC2')
@@ -830,8 +784,9 @@ def make_report(data, p_values, n_batches, batch_size, prefix = "", suffix = "")
     plt.savefig(path, bbox_inches = 'tight')
     plt.clf()
 
+    p_values = test_batch_effect_fast(y, n_batches, batch_size)
     plt.hist(p_values)
-    plot_title = prefix + " p value histogram of batch effect, epoch " + suffix
+    plot_title = prefix + "p_value_histogram_batch_effect_epoch_" + suffix
     plt.title(plot_title)
     plt.ylabel('Count')
     plt.xlabel('p value')
@@ -845,6 +800,9 @@ def make_report(data, p_values, n_batches, batch_size, prefix = "", suffix = "")
 def batchless_entropy_estimate(n_batches, batch_size, sample_size = 7000000):
     N = batch_size * n_batches
     K = n_batches
+    # df2_test = 10000
+    # p = torch.distributions.FisherSnedecor(df1 = K-1, df2 = df2_test)
+    # F_stat = np.random.f(K-1, df2_test, sample_size)
 
     p = torch.distributions.FisherSnedecor(df1 = K-1, df2 = N-K)
     F_stat = np.random.f(K-1, N-K, sample_size)
@@ -897,4 +855,14 @@ def correction_scatter(original_data, corrected_data, n_batches, batch_size):
               plots[i, j].set_title("Batch " + format(i*cols + j) + " mean vs correction")
               if (j == 0):
                   plots[i, j].set_ylabel('Batch correction')
+
+
+## data is a CrossTab in pandas dataframe form, in the same format as when passed to the network.
+## samples from a single batch appear together in the columns, and same size batches
+def compute_batch_effect(data, n_batches, batch_size):
+    y = torch.tensor(data.copy().values)
+    p_values = test_batch_effect_fast(y, n_batches, batch_size)
+
+    p_values = pd.DataFrame([p_values, data.index])
+    return(p_values.transpose())
 
