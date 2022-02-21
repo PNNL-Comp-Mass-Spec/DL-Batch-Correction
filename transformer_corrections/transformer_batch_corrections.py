@@ -707,7 +707,7 @@ def fisher_kldiv(corrected_data, n_batches, batch_size, batchless_entropy):
     p = torch.distributions.FisherSnedecor(df1 = K-1, df2 = N-K)
     log_F = p.log_prob(F_stat)
 
-    loss_kl = -torch.sum(log_F - batchless_entropy)
+    loss_kl = torch.abs(torch.sum(log_F - batchless_entropy))
     return loss_kl
 
 
