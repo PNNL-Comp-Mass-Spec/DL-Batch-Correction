@@ -269,6 +269,8 @@ class Correction_peptide(nn.Module):
                                self.n_batches, 
                                self.batch_size, 
                                self.batchless_entropy)
+        loss_kl = torch.abs(loss_kl)
+        
         return loss_kl + self.reg_factor * torch.sum(z**2)
 
 
@@ -293,8 +295,8 @@ class Correction_peptide(nn.Module):
 
         for epoch in range(epochs):
             if ((epoch % report_frequency == 0) and not train_complete):
-                test_loss = 0
-                full_loss = 0
+                self.eval()
+                test_loss = training_loss = full_loss = 0
                 data_corrected = []
                 p_values = []
                 
@@ -310,6 +312,13 @@ class Correction_peptide(nn.Module):
                     loss = objective(y, z)
                     data_corrected.append((y-z).detach().cpu())
                     full_loss += float(loss)
+
+                for x, mask, y, _ in self.trainloader:
+                    x, mask = x.clone().detach().to(self.device), mask.detach().to(self.device) 
+                    y, z = y.clone().detach().to(self.device), self.network(x, mask)
+                    loss = objective(y, z)
+                    training_loss += float(loss)
+
 
                 test_loss = test_loss / self.test_n
                 full_loss = full_loss / (self.test_n + self.train_n)
@@ -328,6 +337,7 @@ class Correction_peptide(nn.Module):
 
             training_loss = 0
             if(not train_complete):
+                self.train()
                 for x, mask, y, _ in self.trainloader:
                     self.optimizer.zero_grad()
                     x, mask = x.clone().detach().to(self.device), mask.detach().to(self.device) 
@@ -354,6 +364,7 @@ class Correction_peptide(nn.Module):
                 plt.clf()
 
         data_corrected_output = []
+        self.eval()
         for x, mask, y, _ in self.loader:
             x, mask, y = x.clone().detach().to(self.device), mask.detach().to(self.device), y.clone().detach().to(self.device)
             z = (y - self.network(x, mask)).detach().cpu()
@@ -368,11 +379,12 @@ class Correction_peptide(nn.Module):
         self.corrected_data = data_corrected_output
 
 
-    def scatter_comparison(self):
+    def scatter_comparison(self, alpha = 0.07):
         correction_scatter(original_data = self.CrossTab, 
                            corrected_data = self.corrected_data, 
                            n_batches = self.n_batches, 
-                           batch_size = self.batch_size)
+                           batch_size = self.batch_size,
+                           alpha = alpha)
 
 
     def batch_density_plot(self, *args, corrected = False):
@@ -419,6 +431,9 @@ class Correction_data(nn.Module):
                                                       batch_size = minibatch_size)
         self.loader = torch.utils.data.DataLoader(self.FULL_DATA, shuffle = False, 
                                                   batch_size = minibatch_size)
+        
+        # shuffled_dataset = torch.utils.data.Subset(my_dataset, torch.randperm(len(my_dataset)).tolist())
+        # dataloader = DataLoader(shuffled_dataset, batch_size=4, num_workers=4, shuffled=False)
 
         ## Important self variables
         self.reg_factor = reg_factor
@@ -451,7 +466,10 @@ class Correction_data(nn.Module):
                                   self.batchless_entropy)
   
         reg_dist = self.reg_factor * torch.sum(z**2)
-        return(batch_dist + reg_dist)
+        return torch.abs(batch_dist) + reg_dist
+
+    # def asses_batch_effect(self, corrected = True):
+
 
 
     def compute_correction(self, y, mask):
@@ -468,7 +486,8 @@ class Correction_data(nn.Module):
 
         for epoch in range(epochs):
             if ((epoch % report_frequency == 0) and not train_complete):
-                test_loss = full_loss = 0
+                self.eval()
+                test_loss = full_loss = training_loss = 0
                 data_corrected = []
                 
                 for _, _, y, mask in self.testloader:
@@ -481,6 +500,15 @@ class Correction_data(nn.Module):
                     loss = self.objective(y, z)
                     full_loss += float(loss)
                     data_corrected.append(y-z)
+
+                for _, _, y, mask in self.trainloader:
+                    y, z = self.compute_correction(y, mask)
+                    loss = self.objective(y, z)
+                    training_loss += float(loss)
+
+                training_loss = training_loss / self.train_n
+                train_loss_all.append(training_loss)
+                print("Training loss is " + format(training_loss))
 
                 test_loss = test_loss / self.test_n
                 full_loss = full_loss / self.data_n
@@ -497,9 +525,10 @@ class Correction_data(nn.Module):
                 if (full_loss < loss_cutoff):
                     train_complete = True
 
-            training_loss = 0
             if (not train_complete):
-                ## The training is done here. 
+                self.train()
+                training_loss = 0
+                ## The training is done here.
                 for _, _, y, mask in self.trainloader:
                     self.optimizer.zero_grad()
                     y, z = self.compute_correction(y, mask)
@@ -527,6 +556,7 @@ class Correction_data(nn.Module):
 
         ## Finished loop, saving corrected data
         data_corrected_output = []
+        self.eval()
         for _, _, y, mask in self.loader:
             y, z = self.compute_correction(y, mask)
 
@@ -541,11 +571,12 @@ class Correction_data(nn.Module):
         self.corrected_data = data_corrected_output
 
     
-    def scatter_comparison(self):
+    def scatter_comparison(self, alpha = 0.07):
         correction_scatter(original_data = self.CrossTab, 
                            corrected_data = self.corrected_data, 
                            n_batches = self.n_batches, 
-                           batch_size = self.batch_size)
+                           batch_size = self.batch_size,
+                           alpha = alpha)
 
 
     def batch_density_plot(self, *args, corrected = False):
@@ -829,7 +860,7 @@ def batch_density_plot(data, n_batches, batch_size, plot_title, *args):
 
 
 
-def correction_scatter(original_data, corrected_data, n_batches, batch_size):
+def correction_scatter(original_data, corrected_data, n_batches, batch_size, alpha = 0.07):
       plt.clf()
       data_tensor = torch.tensor(original_data.values)
       data_tensor = data_tensor.reshape(len(data_tensor), n_batches, batch_size)
@@ -848,7 +879,7 @@ def correction_scatter(original_data, corrected_data, n_batches, batch_size):
 
       for i in range(rows):
           for j in range(cols):
-              plots[i, j].scatter(data_means_og[:, i*cols + j], corrections[:, i*cols + j])
+              plots[i, j].scatter(data_means_og[:, i*cols + j], corrections[:, i*cols + j], alpha = alpha)
               plots[i, j].set_ylim(-1.5, 1.5)
               plots[i, j].set_xlim(-1.5, 1.5)
               plots[i, j].set_xlabel('Uncorrected batch mean')
