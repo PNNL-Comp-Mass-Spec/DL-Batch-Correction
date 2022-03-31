@@ -280,7 +280,8 @@ class Correction_peptide(nn.Module):
         return torch.sum(y**2) / (self.n_batches * self.batch_size)
 
 
-    def train_model(self, epochs, loss_cutoff, report_frequency = 50, objective = "batch_correction", run_name = ""):
+    def train_model(self, epochs, loss_cutoff, report_frequency = 10, early_stopping = 100, objective = "batch_correction", run_name = ""):
+        early_stopping_N = early_stopping // report_frequency
         train_complete = False
         train_loss_all = []
         test_loss_all = []
@@ -334,6 +335,11 @@ class Correction_peptide(nn.Module):
 
                 if (full_loss < loss_cutoff):
                     train_complete = True
+
+                if (len(test_loss_all) > early_stopping_N):
+                    ii = early_stopping_N + 1
+                    if (min(test_loss_all[-early_stopping_N:]) >= test_loss_all[-ii]):
+                        train_complete = True
 
             training_loss = 0
             if(not train_complete):
