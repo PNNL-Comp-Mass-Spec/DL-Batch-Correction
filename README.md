@@ -38,3 +38,4 @@ Sample_n 2     2
 
 * [NormAE demo](https://colab.research.google.com/drive/1RLyh5yqNW8DD9vyjBL0pQoXOaqnTBAXO?usp=sharing)
 * [Peptide transformer](https://colab.research.google.com/drive/1GAh0lC1hI-DEFqzLxjaRbO4eRKshXwL3?usp=sharing)
+* [Transformer Simple Correction (NEW)](https://colab.research.google.com/drive/1OpS4fzwI_v09rUapaXo7Ki0_kSxZVN-0?usp=sharing)  - Data for use in the notebook can be found within the shared '\MSSHARE\Camilo_Posso\Batch_Correction\' folder.
