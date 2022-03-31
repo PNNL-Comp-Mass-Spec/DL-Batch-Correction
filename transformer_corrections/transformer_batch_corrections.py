@@ -215,8 +215,8 @@ class TransformNetAvg(nn.Module):
 
 
 class Correction_peptide(nn.Module):
-    def __init__(self, CrossTab, emb, depth, reg_factor, n_batches, batch_size, test_size, minibatch_size, 
-                 random_state, heads = 5, ff_mult = 5):
+    def __init__(self, CrossTab, emb, depth, n_batches, batch_size, test_size, minibatch_size, 
+                 random_state, reg_factor = 0, heads = 5, ff_mult = 5):
       
         super().__init__()
 
@@ -280,7 +280,7 @@ class Correction_peptide(nn.Module):
         return torch.sum(y**2) / (self.n_batches * self.batch_size)
 
 
-    def train_model(self, epochs, loss_cutoff = 0, report_frequency = 10, early_stopping = 100, objective = "batch_correction", run_name = ""):
+    def train_model(self, epochs, loss_cutoff = 0, report_frequency = 10, early_stopping = 100, objective = "mse", run_name = ""):
         early_stopping_N = early_stopping // report_frequency
         train_complete = False
         train_loss_all = []
